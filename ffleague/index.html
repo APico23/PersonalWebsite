@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Custom fantasy football league dashboard with live Sleeper matchups, standings, and rock-style analytics." />
+  <meta name="theme-color" content="#0d0b0a" />
+  <title>FF League | Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Karla:wght@400;500;600;700;800&family=Pirata+One&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body data-page="dashboard">
+  <div class="page-shell">
+    <header class="site-header">
+      <div class="brand-line">
+        <div>
+          <p class="brand-kicker">Austin Pico / League Operations</p>
+          <h1 class="brand-title"><span id="league-name">Football Fellas</span></h1>
+          <p class="brand-sub"><span id="league-season"></span> / <span id="week-label"></span> / War Room</p>
+        </div>
+        <a class="home-link" href="../index.html">Back to Projects</a>
+      </div>
+      <nav class="nav-strip">
+        <a href="index.html" data-nav="dashboard">Dashboard</a>
+        <a href="analytics.html" data-nav="analytics">Analytics</a>
+        <a href="managers.html" data-nav="managers">Managers</a>
+        <a href="players.html" data-nav="players">Players</a>
+        <a href="trade-block.html" data-nav="trade-block">Trade Block</a>
+      </nav>
+    </header>
+
+    <div id="error-slot"></div>
+    <div id="loading-slot"></div>
+
+    <section class="panel dashboard-toolbar" aria-label="Dashboard controls">
+      <div>
+        <div class="flame-tag">Live League Command</div>
+        <div id="sync-label" class="sync-status">Sleeper data synced</div>
+      </div>
+      <div class="week-control">
+        <label for="week-picker">Matchup Week</label>
+        <select id="week-picker"></select>
+      </div>
+    </section>
+
+    <main class="main-grid">
+      <section>
+        <section class="panel">
+          <h2 class="panel-title">League Overview</h2>
+          <div id="overview-kpi" class="kpi-row"></div>
+          <div id="playoff-picture" class="card" style="margin-top:8px"></div>
+        </section>
+
+        <section class="panel">
+          <h2 class="panel-title">Current Matchups</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Manager</th>
+                  <th>Score</th>
+                  <th></th>
+                  <th>Score</th>
+                  <th>Manager</th>
+                  <th>Margin</th>
+                </tr>
+              </thead>
+              <tbody id="matchup-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2 class="panel-title">Season Standings</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Manager</th>
+                  <th>Record</th>
+                  <th>Points For</th>
+                </tr>
+              </thead>
+              <tbody id="standings-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2 id="weekly-recap-title" class="panel-title">Weekly Recap</h2>
+          <div id="weekly-recap" class="grid-3"></div>
+        </section>
+
+        <section class="panel">
+          <h2 class="panel-title">League History</h2>
+          <div id="league-history" class="grid-2"></div>
+        </section>
+      </section>
+
+      <aside class="panel">
+        <h2 class="panel-title">Scrolling News Feed</h2>
+        <div id="news-feed" class="feed-list"></div>
+      </aside>
+    </main>
+
+    <footer class="footer">
+      <a href="../index.html">Austin Pico Projects</a>
+      Player images from ESPN and Sleeper public CDNs. Player values use FantasyCalc when available with internal fallback model. This is an unofficial fan project and is not affiliated with Sleeper or ESPN.
+    </footer>
+  </div>
+
+  <script type="module" src="assets/app.js"></script>
+  <script src="assets/legal-footer.js"></script>
+</body>
+</html>

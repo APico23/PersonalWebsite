@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Manager performance profiles: all-time records, awards, head-to-head, and trading profile." />
+  <meta name="theme-color" content="#0d0b0a" />
+  <title>FF League | Managers</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Karla:wght@400;500;600;700;800&family=Pirata+One&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body data-page="managers">
+  <div class="page-shell">
+    <header class="site-header">
+      <div class="brand-line">
+        <div>
+          <p class="brand-kicker">Austin Pico / League Operations</p>
+          <h1 class="brand-title"><span id="league-name">Football Fellas</span></h1>
+          <p class="brand-sub"><span id="league-season"></span> / <span id="week-label"></span> / Managers</p>
+        </div>
+        <a class="home-link" href="../index.html">Back to Projects</a>
+      </div>
+      <nav class="nav-strip">
+        <a href="index.html" data-nav="dashboard">Dashboard</a>
+        <a href="analytics.html" data-nav="analytics">Analytics</a>
+        <a href="managers.html" data-nav="managers">Managers</a>
+        <a href="players.html" data-nav="players">Players</a>
+        <a href="trade-block.html" data-nav="trade-block">Trade Block</a>
+      </nav>
+    </header>
+
+    <div id="error-slot"></div>
+    <div id="loading-slot"></div>
+
+    <section class="panel">
+      <h2 class="panel-title">Manager Selector</h2>
+      <div class="input-row" style="grid-template-columns:1fr">
+        <label class="field-label" for="manager-select">Choose a manager</label>
+        <select id="manager-select"></select>
+      </div>
+      <p class="mini-note">Includes historical win/loss, head-to-head outcomes, awards, and start-value player analysis.</p>
+    </section>
+
+    <section id="manager-output" class="panel"></section>
+
+    <footer class="footer">
+      <a href="../index.html">Austin Pico Projects</a>
+      Manager trends aggregate across linked previous leagues when Sleeper provides history links.
+    </footer>
+  </div>
+
+  <script type="module" src="assets/app.js"></script>
+  <script src="assets/legal-footer.js"></script>
+</body>
+</html>

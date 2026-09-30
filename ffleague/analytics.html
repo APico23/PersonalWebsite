@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Advanced fantasy football analytics page including trade fairness, roster composition, age profiles, and performance diagnostics." />
+  <meta name="theme-color" content="#0d0b0a" />
+  <title>FF League | Analytics</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Karla:wght@400;500;600;700;800&family=Pirata+One&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body data-page="analytics">
+  <div class="page-shell">
+    <header class="site-header">
+      <div class="brand-line">
+        <div>
+          <p class="brand-kicker">Austin Pico / League Operations</p>
+          <h1 class="brand-title"><span id="league-name">Football Fellas</span></h1>
+          <p class="brand-sub"><span id="league-season"></span> / <span id="week-label"></span> / Analytics</p>
+        </div>
+        <a class="home-link" href="../index.html">Back to Projects</a>
+      </div>
+      <nav class="nav-strip">
+        <a href="index.html" data-nav="dashboard">Dashboard</a>
+        <a href="analytics.html" data-nav="analytics">Analytics</a>
+        <a href="managers.html" data-nav="managers">Managers</a>
+        <a href="players.html" data-nav="players">Players</a>
+        <a href="trade-block.html" data-nav="trade-block">Trade Block</a>
+      </nav>
+    </header>
+
+    <div id="error-slot"></div>
+    <div id="loading-slot"></div>
+
+    <section class="panel">
+      <h2 class="panel-title">Visual Analytics</h2>
+      <div class="grid-2">
+        <div class="card">
+          <h4>Weekly Scoring Trend</h4>
+          <p class="mini-note">Yellow: league average score, Orange: weekly high score.</p>
+          <canvas id="trend-chart" width="640" height="260" aria-label="Weekly scoring trend chart"></canvas>
+        </div>
+        <div class="card">
+          <h4>Top Consistency Ratings</h4>
+          <p class="mini-note">Green bars show consistency score for top teams by average points.</p>
+          <canvas id="consistency-chart" width="640" height="260" aria-label="Consistency bar chart"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title">Advanced Metrics Snapshot</h2>
+      <div id="analytics-overview" class="grid-2"></div>
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title">Team Composition Metrics</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Manager</th>
+              <th>Most Players From Team</th>
+              <th>Least Players From Team</th>
+              <th>NFL Teams Represented</th>
+              <th>Diversity Index</th>
+            </tr>
+          </thead>
+          <tbody id="composition-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title">Trade Fairness Rankings</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Rank</th>
+              <th>Trade ID</th>
+              <th>Value Difference</th>
+              <th>Fairness</th>
+              <th>Impact Summary</th>
+            </tr>
+          </thead>
+          <tbody id="trade-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title">Age Analytics</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Manager</th>
+              <th>Average Age</th>
+              <th>QB Room</th>
+              <th>RB Room</th>
+              <th>WR Room</th>
+              <th>TE Room</th>
+              <th>Defense</th>
+            </tr>
+          </thead>
+          <tbody id="age-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title">Consistency and Matchup Luck</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Manager</th>
+              <th>Consistency Rating</th>
+              <th>Ceiling</th>
+              <th>Floor</th>
+              <th>Luck Differential</th>
+              <th>Completed SOS</th>
+              <th>Remaining SOS</th>
+            </tr>
+          </thead>
+          <tbody id="performance-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title">Future Pick Tracking</h2>
+      <div id="future-picks"></div>
+    </section>
+
+    <footer class="footer">
+      <a href="../index.html">Austin Pico Projects</a>
+      Metrics use Sleeper league, roster, matchup, transaction, and draft endpoints with cache-aware fetches.
+    </footer>
+  </div>
+
+  <script type="module" src="assets/app.js"></script>
+  <script src="assets/legal-footer.js"></script>
+</body>
+</html>
