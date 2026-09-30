@@ -597,32 +597,6 @@ export function managerAwards(historyBundles, ownerId) {
   };
 }
 
-export function playerOwnershipTimeline(historyBundles, playerId) {
-  const timeline = [];
-  for (const season of historyBundles) {
-    const usersByOwner = {};
-    for (const r of safeArray(season.rosters)) usersByOwner[String(r.roster_id)] = String(r.owner_id);
-
-    for (const weekly of safeArray(season.transactions || [])) {
-      for (const tx of safeArray(weekly.items || [])) {
-        const addRoster = tx.adds?.[playerId];
-        const dropRoster = tx.drops?.[playerId];
-        if (addRoster || dropRoster) {
-          timeline.push({
-            season: season.league?.season,
-            week: weekly.week,
-            addRoster: addRoster ? String(addRoster) : "",
-            dropRoster: dropRoster ? String(dropRoster) : "",
-            addOwnerId: addRoster ? usersByOwner[String(addRoster)] : "",
-            dropOwnerId: dropRoster ? usersByOwner[String(dropRoster)] : "",
-          });
-        }
-      }
-    }
-  }
-  return timeline;
-}
-
 export function tradeBlockRankings(rosters, playersById, playerValues, standings, usersById) {
   const standingsByRoster = Object.fromEntries(standings.map((s) => [s.rosterId, s]));
   const needsByRoster = {};
@@ -739,46 +713,6 @@ export function managerTradeProfile(trades, ownerId) {
     tradeFrequency: mine.length,
     tradeSuccessRate: deltas.length ? deltas.filter((d) => d >= 0).length / deltas.length : 0,
     avgValueDiff: average(deltas),
-  };
-}
-
-export function playerStartedStats(historyBundles, playerId, ownerToManagerNameResolver) {
-  const scores = [];
-  let wins = 0;
-  let losses = 0;
-
-  for (const season of historyBundles) {
-    const rosterIdByOwner = {};
-    for (const r of safeArray(season.rosters)) rosterIdByOwner[String(r.owner_id)] = String(r.roster_id);
-
-    for (const weekly of safeArray(season.weekly || [])) {
-      for (const game of weekly.games) {
-        if (game.teams.length < 2) continue;
-        for (const team of game.teams) {
-          if (!safeArray(team.starters).includes(String(playerId))) continue;
-          const opp = game.teams.find((t) => t.rosterId !== team.rosterId);
-          if (team.points === 0 && Number(opp?.points || 0) === 0) continue;
-          const points = Number(team.playersPoints?.[playerId] || 0);
-          scores.push({
-            season: season.league?.season,
-            week: weekly.week,
-            manager: ownerToManagerNameResolver(season, team.rosterId),
-            points,
-            opponent: opp?.manager || "",
-          });
-          if (team.points > (opp?.points || 0)) wins += 1;
-          if (team.points < (opp?.points || 0)) losses += 1;
-        }
-      }
-    }
-  }
-
-  return {
-    startedCount: scores.length,
-    averagePoints: average(scores.map((s) => s.points)),
-    wins,
-    losses,
-    trends: scores,
   };
 }
 

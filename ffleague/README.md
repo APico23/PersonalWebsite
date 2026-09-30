@@ -4,6 +4,7 @@ Custom fantasy football league site with a sharp-edged heavy-metal and fire visu
 
 ## Data Sources
 - Sleeper API (league, roster, matchup, transaction, and draft data)
+- Supabase shared snapshot cache (primary page-load source with direct Sleeper fallback)
 - Sleeper GraphQL league-player statuses (live trade block)
 - Sleeper web-client projections endpoint (cached with scoring-history fallback because it is not part of the documented API)
 - ESPN and Sleeper public CDNs (player headshots)
@@ -14,13 +15,30 @@ Custom fantasy football league site with a sharp-edged heavy-metal and fire visu
 - `analytics.html`: advanced team, trade, age, performance, and strength-of-schedule metrics
 - `managers.html`: manager history, awards, head-to-head, draft/value profile
 - `divisions.html`: season-by-season division assignments, winners, career records, and rivalries
-- `players.html`: player-level started performance and ownership movement
 - `trade-block.html`: active trade block ranking with visible roster-fit recommendations
 
 ## Usage
 1. Open any page under `ffleague` in a browser.
-2. League ID and rivalries are loaded from `assets/config.js`; trade-block players sync from Sleeper.
-3. No on-page data entry is enabled in this build.
+2. League ID and rivalries are loaded from `assets/config.js`; league data loads from the shared Supabase snapshot.
+3. The dashboard's `Refresh Sleeper Data` button refreshes that shared snapshot after the 15-minute cooldown.
+4. No on-page data entry is enabled in this build.
+
+## Shared Sleeper Cache
+- All visitors read the same compact snapshot from the `ffleague_snapshots` Supabase table.
+- The snapshot stores only fields used by the site: IDs, team names, league settings, rosters, scores, lineups, transactions, draft picks, brackets, player names/statuses, and projections.
+- No image files are stored. Sleeper avatar IDs and ESPN player IDs remain lightweight references to CDN images.
+- The `refresh-ffleague` Edge Function owns all writes and enforces one refresh every 15 minutes across all visitors.
+- If Supabase is temporarily unavailable, the frontend falls back to direct Sleeper requests.
+
+Deploy the shared cache from a Supabase CLI session authorized for the existing portfolio project:
+
+```powershell
+supabase link --project-ref fupysqufnvblxyocqxey
+supabase db push
+supabase functions deploy refresh-ffleague --no-verify-jwt
+```
+
+After deployment, use `Refresh Sleeper Data` on the dashboard once to seed the shared snapshot.
 
 ## Code Configuration
 - Edit `assets/config.js` to change:

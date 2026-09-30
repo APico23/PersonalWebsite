@@ -1,7 +1,19 @@
-import { LEAGUE_ID } from "./config.js";
+import { LEAGUE_ID, SUPABASE_KEY, SUPABASE_URL } from "./config.js";
 
 const SLEEPER_BASE = "https://api.sleeper.app/v1";
 const SLEEPER_GRAPHQL = "https://api.sleeper.app/graphql";
+const SNAPSHOT_ID = "primary";
+export const SLEEPER_REFRESH_COOLDOWN_MS = 15 * 60 * 1000;
+let sharedSnapshot = null;
+let sharedSnapshotRefreshedAt = 0;
+
+function snapshotSeason(leagueId) {
+  return sharedSnapshot?.seasons?.find((season) => String(season.leagueId) === String(leagueId));
+}
+
+function snapshotWeek(collection, week) {
+  return collection?.[String(week)] || [];
+}
 
 function safeJsonParse(value, fallback) {
   try {
@@ -80,7 +92,67 @@ export function getLeagueId() {
   return /^\d+$/.test(LEAGUE_ID) ? LEAGUE_ID : "";
 }
 
+export async function initializeSharedData() {
+  try {
+    const params = new URLSearchParams({
+      select: "payload,refreshed_at",
+      id: `eq.${SNAPSHOT_ID}`,
+      limit: "1",
+    });
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/ffleague_snapshots?${params}`, {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+      },
+      cache: "no-store",
+    });
+    if (!response.ok) return null;
+    const [row] = await response.json();
+    if (!row?.payload?.seasons?.length) return null;
+    sharedSnapshot = row.payload;
+    sharedSnapshotRefreshedAt = Date.parse(row.refreshed_at || "") || Number(row.payload.generatedAt || 0);
+    return sharedSnapshot;
+  } catch {
+    return null;
+  }
+}
+
+export function getSharedDataStatus() {
+  const ageMs = sharedSnapshotRefreshedAt
+    ? Math.max(0, Date.now() - sharedSnapshotRefreshedAt)
+    : Infinity;
+  return {
+    usingSharedData: Boolean(sharedSnapshot),
+    refreshedAt: sharedSnapshotRefreshedAt,
+    canRefresh: ageMs >= SLEEPER_REFRESH_COOLDOWN_MS,
+    retryAt: Number.isFinite(ageMs)
+      ? sharedSnapshotRefreshedAt + SLEEPER_REFRESH_COOLDOWN_MS
+      : 0,
+  };
+}
+
+export async function refreshSharedData() {
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/refresh-ffleague`, {
+    method: "POST",
+    headers: {
+      apikey: SUPABASE_KEY,
+      Authorization: `Bearer ${SUPABASE_KEY}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ leagueId: LEAGUE_ID }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload.error || `Refresh failed (${response.status})`);
+    error.retryAt = payload.retryAt ? Date.parse(payload.retryAt) : 0;
+    throw error;
+  }
+  await initializeSharedData();
+  return payload;
+}
+
 export async function getNflState() {
+  if (sharedSnapshot?.nflState) return sharedSnapshot.nflState;
   const cacheKey = "ffl_cache_nfl_state";
   const cached = getCache(cacheKey);
   if (cached) return cached;
@@ -90,6 +162,8 @@ export async function getNflState() {
 }
 
 export async function getLeagueCore(leagueId) {
+  const season = snapshotSeason(leagueId);
+  if (season) return { league: season.league, users: season.users, rosters: season.rosters };
   const cacheKey = `ffl_cache_core_${leagueId}`;
   const cached = getCache(cacheKey);
   if (cached) return cached;
@@ -106,6 +180,8 @@ export async function getLeagueCore(leagueId) {
 }
 
 export async function getMatchups(leagueId, week) {
+  const season = snapshotSeason(leagueId);
+  if (season) return snapshotWeek(season.matchups, week);
   const cacheKey = `ffl_cache_matchups_${leagueId}_${week}`;
   const cached = getCache(cacheKey);
   if (cached) return cached;
@@ -116,6 +192,8 @@ export async function getMatchups(leagueId, week) {
 }
 
 export async function getTransactions(leagueId, week) {
+  const season = snapshotSeason(leagueId);
+  if (season) return snapshotWeek(season.transactions, week);
   const cacheKey = `ffl_cache_transactions_${leagueId}_${week}`;
   const cached = getCache(cacheKey);
   if (cached) return cached;
@@ -125,6 +203,9 @@ export async function getTransactions(leagueId, week) {
 }
 
 export async function getTradeBlockEntries(leagueId) {
+  if (sharedSnapshot && String(sharedSnapshot.rootLeagueId) === String(leagueId)) {
+    return sharedSnapshot.tradeBlockEntries || [];
+  }
   const cacheKey = `ffl_cache_trade_block_v1_${leagueId}`;
   const cached = getCache(cacheKey);
   if (cached) return cached;
@@ -149,6 +230,8 @@ export async function getTradeBlockEntries(leagueId) {
 }
 
 export async function getDraftPicks(leagueId) {
+  const season = snapshotSeason(leagueId);
+  if (season) return season.draftPicks || [];
   const cacheKey = `ffl_cache_draftpicks_v3_${leagueId}`;
   const cached = getCache(cacheKey);
   if (cached) return cached;
@@ -174,6 +257,7 @@ export async function getDraftPicks(leagueId) {
 }
 
 export async function getPlayers() {
+  if (sharedSnapshot?.players) return sharedSnapshot.players;
   const cacheKey = "ffl_cache_players_nfl";
   const cached = getCache(cacheKey);
   if (cached) return cached;
@@ -184,6 +268,10 @@ export async function getPlayers() {
 }
 
 export async function getPlayerProjections(season, week, playerIds = []) {
+  if (String(sharedSnapshot?.nflState?.season) === String(season)
+    && Number(sharedSnapshot?.nflState?.week) === Number(week)) {
+    return sharedSnapshot.projections || {};
+  }
   const cacheKey = `ffl_cache_projections_${season}_${week}`;
   const cached = getCache(cacheKey);
   if (cached) return cached;
@@ -213,6 +301,8 @@ export async function getPlayerProjections(season, week, playerIds = []) {
 }
 
 export async function getBrackets(leagueId) {
+  const season = snapshotSeason(leagueId);
+  if (season) return season.brackets || { winners: [], losers: [] };
   const cacheKey = `ffl_cache_brackets_${leagueId}`;
   const cached = getCache(cacheKey);
   if (cached) return cached;
@@ -227,6 +317,14 @@ export async function getBrackets(leagueId) {
 }
 
 export async function getLeagueHistory(leagueId, maxSeasons = 6) {
+  if (sharedSnapshot && String(sharedSnapshot.rootLeagueId) === String(leagueId)) {
+    return sharedSnapshot.seasons.slice(0, maxSeasons).map((season) => ({
+      leagueId: season.leagueId,
+      league: season.league,
+      users: season.users,
+      rosters: season.rosters,
+    }));
+  }
   const history = [];
   let current = String(leagueId || "");
   for (let i = 0; i < maxSeasons; i += 1) {

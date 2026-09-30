@@ -11,7 +11,7 @@ const include = [
   "index.html",
   "analytics.html",
   "managers.html",
-  "players.html",
+  "divisions.html",
   "trade-block.html",
   "privacy.html",
   "README.md",

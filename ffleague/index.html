@@ -27,7 +27,6 @@
         <a href="analytics.html" data-nav="analytics">Analytics</a>
         <a href="managers.html" data-nav="managers">Managers</a>
         <a href="divisions.html" data-nav="divisions">Divisions</a>
-        <a href="players.html" data-nav="players">Players</a>
         <a href="trade-block.html" data-nav="trade-block">Trade Block</a>
       </nav>
     </header>
@@ -39,10 +38,17 @@
       <div>
         <div class="flame-tag">Live League Command</div>
         <div id="sync-label" class="sync-status">Sleeper data synced</div>
+        <div id="snapshot-updated" class="snapshot-updated"></div>
       </div>
-      <div class="week-control">
-        <label for="week-picker">Matchup Week</label>
-        <select id="week-picker"></select>
+      <div class="dashboard-actions">
+        <div class="week-control">
+          <label for="week-picker">Matchup Week</label>
+          <select id="week-picker"></select>
+        </div>
+        <div class="refresh-control">
+          <span>Shared Data</span>
+          <button id="refresh-sleeper" class="refresh-button" type="button">Refresh Sleeper</button>
+        </div>
       </div>
     </section>
 

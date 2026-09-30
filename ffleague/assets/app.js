@@ -1,6 +1,7 @@
 import {
   getBrackets,
   getDraftPicks,
+  getSharedDataStatus,
   getLeagueCore,
   getLeagueHistory,
   getLeagueId,
@@ -13,6 +14,8 @@ import {
   getPlayerValues,
   getTradeBlockEntries,
   getTransactions,
+  initializeSharedData,
+  refreshSharedData,
 } from "./api.js";
 import { MANAGER_IMAGES, RIVALRIES } from "./config.js";
 import {
@@ -30,8 +33,6 @@ import {
   TRADE_RANKING_DESCRIPTION,
   mapRosters,
   mapUsers,
-  playerOwnershipTimeline,
-  playerStartedStats,
   playoffPicture,
   teamCompositionMetrics,
   tradeBlockRankings,
@@ -231,6 +232,17 @@ function managerNameFromRosterId(rosterId) {
   return user.display_name || user.username || `Roster ${rosterId}`;
 }
 
+function teamNameFromRosterId(rosterId, season = state) {
+  const roster = season.rostersById?.[String(rosterId)] || {};
+  const user = season.usersById?.[String(roster.owner_id)] || {};
+  return user.metadata?.team_name || user.display_name || user.username || `Roster ${rosterId}`;
+}
+
+function dashboardTeamName(managerName) {
+  const standing = state.standings.find((row) => row.manager === managerName);
+  return standing ? teamNameFromRosterId(standing.rosterId) : managerName;
+}
+
 function managerIdentityFromRosterId(rosterId, season = state) {
   const roster = season.rostersById?.[String(rosterId)] || {};
   const user = season.usersById?.[String(roster.owner_id)] || {};
@@ -343,6 +355,45 @@ function renderLeagueIdentity() {
   text(qs("#week-label"), `Week ${state.selectedWeek}`);
 }
 
+function renderSyncStatus() {
+  const status = getSharedDataStatus();
+  const button = qs("#refresh-sleeper");
+  const updated = qs("#snapshot-updated");
+  text(qs("#sync-label"), status.usingSharedData ? "Shared Supabase snapshot loaded" : "Direct Sleeper fallback active");
+  text(updated, status.refreshedAt ? `Updated ${dateLabel(status.refreshedAt)}` : "Shared snapshot not provisioned");
+  if (!button) return;
+  button.disabled = !status.canRefresh;
+  button.textContent = status.canRefresh ? "Refresh Sleeper Data" : "Refresh Available Soon";
+  button.title = status.canRefresh
+    ? "Fetch a fresh compact snapshot from Sleeper"
+    : `Refresh available ${dateLabel(status.retryAt)}`;
+}
+
+function initRefreshControl() {
+  const button = qs("#refresh-sleeper");
+  if (!button) return;
+  renderSyncStatus();
+  const initialStatus = getSharedDataStatus();
+  if (!initialStatus.canRefresh && initialStatus.retryAt > Date.now()) {
+    setTimeout(renderSyncStatus, initialStatus.retryAt - Date.now() + 100);
+  }
+  button.addEventListener("click", async () => {
+    const status = getSharedDataStatus();
+    if (!status.canRefresh) return;
+    button.disabled = true;
+    button.textContent = "Refreshing...";
+    renderLoading("Refreshing shared Sleeper snapshot");
+    try {
+      await refreshSharedData();
+      window.location.reload();
+    } catch (error) {
+      clearLoading();
+      renderError(`Sleeper refresh failed: ${error.message}`);
+      renderSyncStatus();
+    }
+  });
+}
+
 function renderStandings() {
   const tbody = qs("#standings-body");
   if (!tbody) return;
@@ -352,7 +403,7 @@ function renderStandings() {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${row.rank}</td>
-      <td><span class="manager-cell">${identity.image ? `<img class="manager-avatar" src="${escapeHtml(identity.image)}" alt="" loading="lazy" />` : ""}<span>${escapeHtml(row.manager)}</span></span></td>
+      <td><span class="manager-cell">${identity.image ? `<img class="manager-avatar" src="${escapeHtml(identity.image)}" alt="" loading="lazy" />` : ""}<span>${escapeHtml(teamNameFromRosterId(row.rosterId))}</span></span></td>
       <td>${row.record}</td>
       <td>${n(row.pointsFor, 2)}</td>
     `;
@@ -377,11 +428,11 @@ function renderMatchups() {
     const tr = document.createElement("tr");
     const scoreClass = state.selectedWeek === state.currentWeek ? "score-live" : "score-final";
     tr.innerHTML = `
-      <td>${escapeHtml(a.manager)}</td>
+      <td>${escapeHtml(teamNameFromRosterId(a.rosterId))}</td>
       <td class="${scoreClass}">${n(a.points, 2)}</td>
       <td>vs</td>
       <td class="${scoreClass}">${n(b.points, 2)}</td>
-      <td>${escapeHtml(b.manager)}</td>
+      <td>${escapeHtml(teamNameFromRosterId(b.rosterId))}</td>
       <td>${n(Math.abs(a.points - b.points), 2)}</td>
     `;
     tbody.appendChild(tr);
@@ -459,9 +510,9 @@ function renderImportantGames() {
     <article class="important-game">
       <div class="important-game-tags">${labels.map((label) => `<span>${escapeHtml(label)}</span>`).join("")}</div>
       <div class="important-game-score">
-        <strong>${escapeHtml(first.manager)}</strong>
+        <strong>${escapeHtml(teamNameFromRosterId(first.rosterId))}</strong>
         <b>${n(first.points, 2)} <small>vs</small> ${n(second.points, 2)}</b>
-        <strong>${escapeHtml(second.manager)}</strong>
+        <strong>${escapeHtml(teamNameFromRosterId(second.rosterId))}</strong>
       </div>
       ${(first.points > 0 || second.points > 0) ? `<p>${n(margin, 2)}-point margin</p>` : '<p>Kickoff pending</p>'}
     </article>
@@ -503,7 +554,7 @@ function renderOverviewKpis(weeklyGamesByWeek = []) {
       ${odds.map((team) => {
         const identity = managerIdentityFromRosterId(team.rosterId);
         return `<div class="odds-row">
-          <span class="manager-cell">${identity.image ? `<img class="manager-avatar" src="${escapeHtml(identity.image)}" alt="" loading="lazy" />` : ""}<span>${escapeHtml(team.manager)}</span></span>
+          <span class="manager-cell">${identity.image ? `<img class="manager-avatar" src="${escapeHtml(identity.image)}" alt="" loading="lazy" />` : ""}<span>${escapeHtml(teamNameFromRosterId(team.rosterId))}</span></span>
           <span class="odds-track"><span style="width:${Math.max(2, team.odds * 100)}%"></span></span>
           <strong>${pct(team.odds, 1)}</strong>
         </div>`;
@@ -528,7 +579,7 @@ function buildNewsItems() {
       const identity = managerIdentityFromRosterId(first?.rosterId);
       items.push({
         type: "Rivalry Alert",
-        body: `${a} and ${b} collide in Week ${state.currentWeek}. ${pickVariant(RIVALRY_QUIPS, `${a}-${b}-${state.currentWeek}`)}`,
+        body: `${dashboardTeamName(a)} and ${dashboardTeamName(b)} collide in Week ${state.currentWeek}. ${pickVariant(RIVALRY_QUIPS, `${a}-${b}-${state.currentWeek}`)}`,
         image: identity.image,
         alt: `${a} manager avatar`,
       });
@@ -541,7 +592,7 @@ function buildNewsItems() {
     const identity = managerIdentityFromRosterId(underdog?.rosterId);
     items.push({
       type: `Week ${state.recapWeek} Upset`,
-      body: `${u.underdog} took down ${u.favorite} by ${n(u.margin, 1)} points. ${pickVariant(UPSET_QUIPS, `${u.underdog}-${u.favorite}-${state.recapWeek}`)}`,
+      body: `${dashboardTeamName(u.underdog)} took down ${dashboardTeamName(u.favorite)} by ${n(u.margin, 1)} points. ${pickVariant(UPSET_QUIPS, `${u.underdog}-${u.favorite}-${state.recapWeek}`)}`,
       image: identity.image,
       alt: `${u.underdog} manager avatar`,
     });
@@ -578,7 +629,7 @@ function buildNewsItems() {
     const player = state.playersById[b.playerId] || {};
     items.push({
       type: `Week ${state.recapWeek} Bust`,
-      body: `${b.name} produced ${n(b.points, 2)} points for ${b.manager}. ${pickVariant(BUST_QUIPS, `${b.playerId}-${b.manager}-${state.recapWeek}`)}`,
+      body: `${b.name} produced ${n(b.points, 2)} points for ${dashboardTeamName(b.manager)}. ${pickVariant(BUST_QUIPS, `${b.playerId}-${b.manager}-${state.recapWeek}`)}`,
       image: getPlayerHeadshot(b.playerId, player),
       alt: `${b.name} headshot`,
     });
@@ -586,7 +637,7 @@ function buildNewsItems() {
 
   const recentTrades = state.weeklyTransactions.filter((t) => t.type === "trade").slice(0, 2);
   for (const t of recentTrades) {
-    const managers = safeArray(t.roster_ids).map(managerNameFromRosterId).join(" and ");
+    const managers = safeArray(t.roster_ids).map(teamNameFromRosterId).join(" and ");
     items.push({
       type: "Trade Wire",
       body: `${managers || "Two managers"} completed a trade at ${dateLabel(Number(t.status_updated || 0))}. ${pickVariant(TRADE_QUIPS, t.transaction_id)}`,
@@ -595,7 +646,7 @@ function buildNewsItems() {
 
   const waivers = state.weeklyTransactions.filter((t) => t.type === "waiver").slice(0, 2);
   for (const w of waivers) {
-    const manager = managerNameFromRosterId(w.roster_ids?.[0]);
+    const manager = teamNameFromRosterId(w.roster_ids?.[0]);
     items.push({
       type: "Waiver Activity",
       body: `${manager} landed a waiver claim at ${dateLabel(Number(w.status_updated || 0))}. ${pickVariant(WAIVER_QUIPS, w.transaction_id)}`,
@@ -610,7 +661,7 @@ function buildNewsItems() {
       playerId,
       player,
       status,
-      manager: managerNameFromRosterId(team.roster_id),
+      manager: teamNameFromRosterId(team.roster_id),
       newsUpdated: Number(player.news_updated || 0),
       priority: (currentStarters.has(playerId) ? 100000 : 0) + Number(state.playerValues[playerId] || 0),
     };
@@ -671,23 +722,23 @@ function renderWeeklyRecap() {
   root.innerHTML = `
     <div class="card">
       <h4>Top Performance</h4>
-      <p>${escapeHtml(summary.topScore.winner.manager)} posted ${n(summary.topScore.winner.points, 2)} points.</p>
+      <p>${escapeHtml(teamNameFromRosterId(summary.topScore.winner.rosterId))} posted ${n(summary.topScore.winner.points, 2)} points.</p>
     </div>
     <div class="card">
       <h4>Worst Performance</h4>
-      <p>${escapeHtml(summary.worstScore.manager)} finished with ${n(summary.worstScore.points, 2)} points.</p>
+      <p>${escapeHtml(teamNameFromRosterId(summary.worstScore.rosterId))} finished with ${n(summary.worstScore.points, 2)} points.</p>
     </div>
     <div class="card">
       <h4>Closest Battle</h4>
-      <p>${escapeHtml(summary.closest.winner.manager)} over ${escapeHtml(summary.closest.loser.manager)} by ${n(summary.closest.margin, 2)}.</p>
+      <p>${escapeHtml(teamNameFromRosterId(summary.closest.winner.rosterId))} over ${escapeHtml(teamNameFromRosterId(summary.closest.loser.rosterId))} by ${n(summary.closest.margin, 2)}.</p>
     </div>
     <div class="card">
       <h4>Biggest Blowout</h4>
-      <p>${escapeHtml(summary.blowout.winner.manager)} dominated ${escapeHtml(summary.blowout.loser.manager)} by ${n(summary.blowout.margin, 2)}.</p>
+      <p>${escapeHtml(teamNameFromRosterId(summary.blowout.winner.rosterId))} dominated ${escapeHtml(teamNameFromRosterId(summary.blowout.loser.rosterId))} by ${n(summary.blowout.margin, 2)}.</p>
     </div>
     <div class="card">
       <h4>Other Results</h4>
-      <ul>${summary.otherGames.map((game) => `<li>${escapeHtml(game.winner.manager)} over ${escapeHtml(game.loser.manager)}, ${n(game.winner.points, 2)}-${n(game.loser.points, 2)}</li>`).join("") || "<li>No other games.</li>"}</ul>
+      <ul>${summary.otherGames.map((game) => `<li>${escapeHtml(teamNameFromRosterId(game.winner.rosterId))} over ${escapeHtml(teamNameFromRosterId(game.loser.rosterId))}, ${n(game.winner.points, 2)}-${n(game.loser.points, 2)}</li>`).join("") || "<li>No other games.</li>"}</ul>
     </div>
   `;
 }
@@ -699,7 +750,11 @@ function getSeasonPodium(season) {
   const rosterIds = [final?.w, final?.l, thirdPlace?.w];
   return rosterIds.map((rosterId, index) => {
     if (!rosterId) return { place: index + 1, name: "N/A", image: "" };
-    return { place: index + 1, ...managerIdentityFromRosterId(rosterId, season) };
+    return {
+      place: index + 1,
+      ...managerIdentityFromRosterId(rosterId, season),
+      name: teamNameFromRosterId(rosterId, season),
+    };
   });
 }
 
@@ -721,7 +776,7 @@ function renderLeagueHistory() {
         <div class="card">
           <h4>${escapeHtml(season.league?.season || "Unknown")} Season</h4>
           <div class="podium-list">${podium.map((manager) => `<div class="podium-row"><strong>${manager.place}</strong>${manager.image ? `<img class="manager-avatar" src="${escapeHtml(manager.image)}" alt="" loading="lazy" />` : ""}<span>${escapeHtml(manager.name)}</span></div>`).join("")}</div>
-          <p>Regular Season Leader: ${top ? `${escapeHtml(top.manager)} (${top.record})` : "N/A"}</p>
+          <p>Regular Season Leader: ${top ? `${escapeHtml(teamNameFromRosterId(top.rosterId, season))} (${top.record})` : "N/A"}</p>
         </div>
       `;
     })
@@ -943,7 +998,7 @@ async function initDashboard() {
         state.weeklyTransactions = safeArray(transactions);
         renderLeagueIdentity();
         renderMatchups();
-        text(qs("#sync-label"), week === state.currentWeek ? "Live Sleeper data synced" : `Archive loaded / Week ${week}`);
+        text(qs("#sync-label"), week === state.currentWeek ? "Current snapshot loaded" : `Snapshot archive / Week ${week}`);
       } catch (error) {
         renderError(`Week ${week} could not be loaded: ${error.message}`);
       } finally {
@@ -956,9 +1011,10 @@ async function initDashboard() {
   renderOverviewKpis();
   renderStandings();
   renderMatchups();
+  initRefreshControl();
   qs("#news-feed").innerHTML = '<div class="loading">Building the league wire</div>';
   qs("#weekly-recap").innerHTML = '<div class="loading">Loading latest completed week</div>';
-  text(qs("#sync-label"), "Live Sleeper data synced");
+  renderSyncStatus();
 
   await loadHistoryData(8);
   const currentSeason = state.history.find((season) => season.leagueId === state.leagueId);
@@ -973,16 +1029,6 @@ async function initDashboard() {
   renderWeeklyRecap();
   renderLeagueHistory();
 
-  setInterval(async () => {
-    if (state.selectedWeek !== state.currentWeek) return;
-    try {
-      const live = await getMatchups(state.leagueId, state.currentWeek);
-      state.weeklyMatchups = buildWeeklyMatchups(live, state.rostersById, state.usersById);
-      renderMatchups();
-    } catch {
-      // Ignore periodic polling failures.
-    }
-  }, 60 * 1000);
 }
 
 async function initAnalyticsPage() {
@@ -1347,87 +1393,6 @@ async function initManagersPage() {
   clearLoading();
 }
 
-function buildPlayerSearch() {
-  const input = qs("#player-search");
-  const out = qs("#player-results");
-  if (!input || !out) return;
-
-  function runSearch() {
-    const q = input.value.trim().toLowerCase();
-    out.innerHTML = "";
-    if (q.length < 2) return;
-
-    const hits = Object.entries(state.playersById)
-      .filter(([, p]) => String(p.full_name || "").toLowerCase().includes(q))
-      .slice(0, 25);
-
-    for (const [pid, p] of hits) {
-      const row = document.createElement("button");
-      row.className = "search-result";
-      row.textContent = `${p.full_name || pid} (${p.position || ""} - ${p.team || ""})`;
-      row.addEventListener("click", () => renderPlayerProfile(pid));
-      out.appendChild(row);
-    }
-  }
-
-  input.addEventListener("input", runSearch);
-  runSearch();
-}
-
-function renderPlayerProfile(playerId) {
-  const out = qs("#player-output");
-  if (!out) return;
-
-  const player = state.playersById[playerId] || {};
-  const started = playerStartedStats(
-    state.history,
-    playerId,
-    (season, rosterId) => {
-      const roster = season.rostersById[String(rosterId)] || {};
-      const user = season.usersById[String(roster.owner_id)] || {};
-      return user.display_name || user.username || `Roster ${rosterId}`;
-    }
-  );
-
-  const ownership = playerOwnershipTimeline(state.history, playerId);
-  const sourceName = /^\d+$/.test(String(player.espn_id || "")) ? "ESPN" : "Sleeper";
-
-  out.innerHTML = `
-    <div class="grid-2">
-      <div class="card">
-        <h4>${escapeHtml(player.full_name || playerId)}</h4>
-        <p>${escapeHtml(player.position || "")} | ${escapeHtml(player.team || "")}</p>
-        <img class="player-headshot" data-player-headshot src="${getPlayerHeadshot(playerId, player)}" alt="${escapeHtml(player.full_name || "Player")} headshot" width="180" height="130" loading="lazy" />
-        <p class="mini-note">Headshot source: ${sourceName} public CDN.</p>
-      </div>
-      <div class="card">
-        <h4>Performance When Started</h4>
-        <p>Starts: ${started.startedCount}</p>
-        <p>Average Points: ${n(started.averagePoints, 2)}</p>
-        <p>Record: ${started.wins}-${started.losses}</p>
-      </div>
-      <div class="card">
-        <h4>Weekly Trends</h4>
-        <ul>${started.trends.slice(-12).map((t) => `<li>${escapeHtml(t.season)} W${t.week}: ${escapeHtml(t.manager)} scored ${n(t.points, 2)} vs ${escapeHtml(t.opponent || "unknown")}</li>`).join("") || "<li>No trend data.</li>"}</ul>
-      </div>
-      <div class="card">
-        <h4>Ownership + Trade Trail</h4>
-        <ul>${ownership.slice(-12).map((o) => `<li>${o.season} W${o.week}: add ${o.addRoster || "-"} / drop ${o.dropRoster || "-"}</li>`).join("") || "<li>No ownership movement data.</li>"}</ul>
-      </div>
-    </div>
-  `;
-
-  const headshot = qs("[data-player-headshot]", out);
-  if (headshot) headshot.addEventListener("error", () => { headshot.hidden = true; });
-}
-
-async function initPlayerPage() {
-  renderLoading("Building player history");
-  await loadHistoryData(8);
-  buildPlayerSearch();
-  clearLoading();
-}
-
 async function renderTradeBlockPage() {
   const root = qs("#trade-block-root");
   if (!root) return;
@@ -1483,11 +1448,8 @@ async function renderTradeBlockPage() {
     .join("") : '<div class="empty-state">No players are currently on the Sleeper trade block.</div>';
 }
 
-function currentManagerName(ownerId, historicalUser = {}) {
-  const currentUser = state.usersById[String(ownerId)] || {};
-  return currentUser.display_name || currentUser.username
-    || historicalUser.display_name || historicalUser.username
-    || "Former manager";
+function seasonTeamName(user = {}) {
+  return user.metadata?.team_name || user.display_name || user.username || "Former team";
 }
 
 function rivalryIdentity(managerName) {
@@ -1497,6 +1459,7 @@ function rivalryIdentity(managerName) {
   if (!standing) return { name: managerName, image: "", rosterId: "", record: "N/A" };
   return {
     ...managerIdentityFromRosterId(standing.rosterId),
+    name: teamNameFromRosterId(standing.rosterId),
     rosterId: standing.rosterId,
     record: standing.record,
   };
@@ -1530,7 +1493,7 @@ async function initDivisionsPage() {
         .filter((roster) => String(roster.settings?.division || "") === divisionId)
         .map((roster) => {
           const ownerId = String(roster.owner_id || "");
-          const manager = currentManagerName(ownerId, historicalUsers[ownerId]);
+          const manager = seasonTeamName(historicalUsers[ownerId]);
           const wins = Number(roster.settings?.wins || 0);
           const losses = Number(roster.settings?.losses || 0);
           const ties = Number(roster.settings?.ties || 0);
@@ -1546,7 +1509,6 @@ async function initDivisionsPage() {
             ties: 0,
             pointsFor: 0,
           };
-          career.manager = manager;
           career.seasons += 1;
           career.wins += wins;
           career.losses += losses;
@@ -1665,9 +1627,10 @@ async function boot() {
     return;
   }
 
-  renderLoading("Syncing Sleeper data");
+  renderLoading("Loading saved league data");
 
   try {
+    await initializeSharedData();
     await loadBaseData();
     renderLeagueIdentity();
     initStaticConfigPanels();
@@ -1677,7 +1640,6 @@ async function boot() {
     if (page === "analytics") await initAnalyticsPage();
     if (page === "managers") await initManagersPage();
     if (page === "divisions") await initDivisionsPage();
-    if (page === "players") await initPlayerPage();
     if (page === "trade-block") await renderTradeBlockPage();
   } catch (error) {
     clearLoading();
