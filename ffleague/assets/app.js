@@ -1110,6 +1110,8 @@ function renderManagerDetails(ownerId) {
       };
     })
     .sort((a, b) => b.diff - a.diff);
+  const bestDraftPick = gradedPicks[0] || null;
+  const worstDraftPick = gradedPicks.length > 1 ? gradedPicks[gradedPicks.length - 1] : null;
 
   const lineupMisses = [];
   const currentSeason = state.history[0];
@@ -1195,12 +1197,12 @@ function renderManagerDetails(ownerId) {
         <ul>${playerAverages.slice(-5).map((p) => `<li>${p.name}: ${n(p.avg, 2)} avg (${p.games} starts)</li>`).join("") || "<li>No players with at least 5 starts.</li>"}</ul>
       </div>
       <div class="card">
-        <h4>Best Draft Picks by Round</h4>
-        <ul>${gradedPicks.slice(0, 5).map((p) => `<li>R${p.round} ${p.name}: ${n(p.diff, 0)} value above slot</li>`).join("") || "<li>No draft pick data.</li>"}</ul>
+        <h4>Best Draft Pick</h4>
+        <ul>${bestDraftPick ? `<li>R${bestDraftPick.round} ${bestDraftPick.name}: ${n(bestDraftPick.diff, 0)} value above slot</li>` : "<li>No draft pick data.</li>"}</ul>
       </div>
       <div class="card">
-        <h4>Worst Draft Picks by Round</h4>
-        <ul>${gradedPicks.slice(-5).map((p) => `<li>R${p.round} ${p.name}: ${n(p.diff, 0)} value vs slot</li>`).join("") || "<li>No draft pick data.</li>"}</ul>
+        <h4>Worst Draft Pick</h4>
+        <ul>${worstDraftPick ? `<li>R${worstDraftPick.round} ${worstDraftPick.name}: ${n(worstDraftPick.diff, 0)} value vs slot</li>` : "<li>Not enough draft pick data.</li>"}</ul>
       </div>
       <div class="card">
         <h4>All-Time Trading Profile</h4>
