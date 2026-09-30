@@ -1078,6 +1078,7 @@ function renderManagerDetails(ownerId) {
       avg: average(scores),
       games: scores.length,
     }))
+    .filter((player) => player.games >= 5)
     .sort((a, b) => b.avg - a.avg);
 
   const playoffs = managerAwards(state.history, ownerId);
@@ -1187,11 +1188,11 @@ function renderManagerDetails(ownerId) {
       </div>
       <div class="card">
         <h4>Most Valuable Starters</h4>
-        <ul>${playerAverages.slice(0, 5).map((p) => `<li>${p.name}: ${n(p.avg, 2)} avg (${p.games} starts)</li>`).join("")}</ul>
+        <ul>${playerAverages.slice(0, 5).map((p) => `<li>${p.name}: ${n(p.avg, 2)} avg (${p.games} starts)</li>`).join("") || "<li>No players with at least 5 starts.</li>"}</ul>
       </div>
       <div class="card">
         <h4>Most Detrimental Starters</h4>
-        <ul>${playerAverages.slice(-5).map((p) => `<li>${p.name}: ${n(p.avg, 2)} avg (${p.games} starts)</li>`).join("")}</ul>
+        <ul>${playerAverages.slice(-5).map((p) => `<li>${p.name}: ${n(p.avg, 2)} avg (${p.games} starts)</li>`).join("") || "<li>No players with at least 5 starts.</li>"}</ul>
       </div>
       <div class="card">
         <h4>Best Draft Picks by Round</h4>
