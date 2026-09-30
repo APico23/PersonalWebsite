@@ -11,9 +11,10 @@ import {
   getPlayerProjections,
   getPlayers,
   getPlayerValues,
+  getTradeBlockEntries,
   getTransactions,
 } from "./api.js";
-import { ACTIVE_TRADE_BLOCK_IDS, MANAGER_IMAGES, RIVALRIES } from "./config.js";
+import { MANAGER_IMAGES, RIVALRIES } from "./config.js";
 import {
   ageMetrics,
   buildPerformanceMetrics,
@@ -242,12 +243,6 @@ function managerIdentityFromRosterId(rosterId, season = state) {
 
 function parseRivalries() {
   return Array.isArray(RIVALRIES) ? RIVALRIES : [];
-}
-
-function parseTradeBlock() {
-  return Array.isArray(ACTIVE_TRADE_BLOCK_IDS)
-    ? ACTIVE_TRADE_BLOCK_IDS.map((x) => String(x)).filter((x) => /^\d+$/.test(x))
-    : [];
 }
 
 async function loadBaseData() {
@@ -1333,7 +1328,7 @@ async function initPlayerPage() {
   clearLoading();
 }
 
-function renderTradeBlockPage() {
+async function renderTradeBlockPage() {
   const root = qs("#trade-block-root");
   if (!root) return;
 
@@ -1345,28 +1340,34 @@ function renderTradeBlockPage() {
     state.usersById
   );
 
-  const activeBlock = parseTradeBlock();
+  const activeBlock = (await getTradeBlockEntries(state.leagueId)).filter((entry) => {
+    const roster = state.rostersById[entry.rosterId];
+    return safeArray(roster?.players).includes(entry.playerId);
+  });
   const valueMap = Object.fromEntries(rankings.map((r) => [r.playerId, r]));
-  const filtered = activeBlock.length
-    ? activeBlock
-        .map((pid) => {
-          const fromRank = valueMap[String(pid)];
+  const filtered = activeBlock
+        .map((entry) => {
+          const pid = entry.playerId;
+          const fromRank = valueMap[pid];
           if (fromRank) return fromRank;
 
-          const ownerRoster = state.rosters.find((r) => safeArray(r.players).includes(String(pid)));
+          const ownerRoster = state.rostersById[entry.rosterId];
           return {
-            playerId: String(pid),
-            playerName: state.playersById[String(pid)]?.full_name || String(pid),
-            position: state.playersById[String(pid)]?.position || "N/A",
+            playerId: pid,
+            playerName: state.playersById[pid]?.full_name || pid,
+            position: state.playersById[pid]?.position || "N/A",
             owner: ownerRoster ? managerNameFromRosterId(ownerRoster.roster_id) : "Unknown",
-            value: Number(state.playerValues[String(pid)] || 0),
+            value: Number(state.playerValues[pid] || 0),
             bestFitManager: "Unknown",
           };
         })
-        .sort((a, b) => b.value - a.value)
-    : rankings;
+        .map((row) => ({
+          ...row,
+          addedAt: activeBlock.find((entry) => entry.playerId === row.playerId)?.addedAt || 0,
+        }))
+        .sort((a, b) => b.value - a.value);
 
-  root.innerHTML = filtered
+  root.innerHTML = filtered.length ? filtered
     .map(
       (row, idx) => `
       <article class="card trade-card">
@@ -1374,11 +1375,12 @@ function renderTradeBlockPage() {
         <h4>${escapeHtml(row.playerName)} (${escapeHtml(row.position)})</h4>
         <p>Current Manager: ${escapeHtml(row.owner)}</p>
         <p>Desirability Score: ${n(row.value, 0)}</p>
+        <p class="mini-note">Added to block: ${escapeHtml(dateLabel(row.addedAt))}</p>
         <div class="fit-callout">Strongest fit: ${escapeHtml(row.bestFitManager)}</div>
       </article>
     `
     )
-    .join("");
+    .join("") : '<div class="empty-state">No players are currently on the Sleeper trade block.</div>';
 }
 
 function initStaticConfigPanels() {
@@ -1392,11 +1394,6 @@ function initStaticConfigPanels() {
     else rivalryList.innerHTML = rivalries.map((r) => `<li>${escapeHtml(r)}</li>`).join("");
   }
 
-  const tradeList = qs("#trade-block-list");
-  if (tradeList) {
-    const ids = parseTradeBlock();
-    tradeList.innerHTML = ids.map((pid) => `<li>${state.playersById[String(pid)]?.full_name || pid}</li>`).join("") || "<li>No active trade block players configured in code.</li>";
-  }
 }
 
 async function boot() {
@@ -1419,7 +1416,7 @@ async function boot() {
     if (page === "analytics") await initAnalyticsPage();
     if (page === "managers") await initManagersPage();
     if (page === "players") await initPlayerPage();
-    if (page === "trade-block") renderTradeBlockPage();
+    if (page === "trade-block") await renderTradeBlockPage();
   } catch (error) {
     clearLoading();
     renderError(`Data load failed: ${error.message}`);

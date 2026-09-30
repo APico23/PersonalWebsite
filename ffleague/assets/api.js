@@ -1,6 +1,7 @@
 import { LEAGUE_ID } from "./config.js";
 
 const SLEEPER_BASE = "https://api.sleeper.app/v1";
+const SLEEPER_GRAPHQL = "https://api.sleeper.app/graphql";
 
 function safeJsonParse(value, fallback) {
   try {
@@ -56,6 +57,25 @@ async function fetchJson(url) {
   }
 }
 
+async function fetchGraphql(query) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch(SLEEPER_GRAPHQL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query }),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`Sleeper GraphQL error ${response.status}`);
+    const payload = await response.json();
+    if (payload.errors?.length) throw new Error(payload.errors[0]?.message || "Sleeper GraphQL request failed");
+    return payload.data || {};
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export function getLeagueId() {
   return /^\d+$/.test(LEAGUE_ID) ? LEAGUE_ID : "";
 }
@@ -102,6 +122,30 @@ export async function getTransactions(leagueId, week) {
   const data = await fetchJson(`${SLEEPER_BASE}/league/${leagueId}/transactions/${week}`);
   setCache(cacheKey, data, 90 * 1000);
   return data;
+}
+
+export async function getTradeBlockEntries(leagueId) {
+  const cacheKey = `ffl_cache_trade_block_v1_${leagueId}`;
+  const cached = getCache(cacheKey);
+  if (cached) return cached;
+
+  const data = await fetchGraphql(`
+    query league_players {
+      league_players(league_id: "${leagueId}") {
+        player_id
+        settings
+      }
+    }
+  `);
+  const entries = (data.league_players || [])
+    .filter((row) => /^\d+$/.test(String(row.player_id || "")) && row.settings?.otb)
+    .map((row) => ({
+      playerId: String(row.player_id),
+      rosterId: String(row.settings.otb),
+      addedAt: Number(row.settings.otb_added_at || 0),
+    }));
+  setCache(cacheKey, entries, 60 * 1000);
+  return entries;
 }
 
 export async function getDraftPicks(leagueId) {

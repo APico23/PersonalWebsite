@@ -4,6 +4,7 @@ Custom fantasy football league site with a sharp-edged heavy-metal and fire visu
 
 ## Data Sources
 - Sleeper API (league, roster, matchup, transaction, and draft data)
+- Sleeper GraphQL league-player statuses (live trade block)
 - Sleeper web-client projections endpoint (cached with scoring-history fallback because it is not part of the documented API)
 - ESPN and Sleeper public CDNs (player headshots)
 - FantasyCalc values API when available, with local fallback player valuation model
@@ -17,14 +18,13 @@ Custom fantasy football league site with a sharp-edged heavy-metal and fire visu
 
 ## Usage
 1. Open any page under `ffleague` in a browser.
-2. League ID, rivalries, and active trade-block players are loaded from `assets/config.js`.
+2. League ID and rivalries are loaded from `assets/config.js`; trade-block players sync from Sleeper.
 3. No on-page data entry is enabled in this build.
 
 ## Code Configuration
 - Edit `assets/config.js` to change:
 	- `LEAGUE_ID`
 	- `RIVALRIES`
-	- `ACTIVE_TRADE_BLOCK_IDS`
 	- `MANAGER_IMAGES` (optional user-ID or display-name keys; falls back to Sleeper avatars)
 
 ## Charts
