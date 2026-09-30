@@ -23,6 +23,7 @@ import {
   calculatePlayoffOdds,
   collectTrades,
   computeStandings,
+  eligibleForSlot,
   managerAwards,
   managerTradeProfile,
   managerTradeRankings,
@@ -366,6 +367,7 @@ function renderMatchups() {
 
   if (!state.weeklyMatchups.some((game) => game.teams.length >= 2)) {
     tbody.innerHTML = '<tr><td class="empty-state" colspan="6">No matchup data is available for this week.</td></tr>';
+    renderImportantGames();
     return;
   }
 
@@ -384,6 +386,86 @@ function renderMatchups() {
     `;
     tbody.appendChild(tr);
   }
+
+  renderImportantGames();
+}
+
+function renderImportantGames() {
+  const root = qs("#important-games");
+  if (!root) return;
+
+  text(qs("#important-games-title"), `Week ${state.selectedWeek} Games to Watch`);
+  const standingsByRoster = Object.fromEntries(state.standings.map((row) => [row.rosterId, row]));
+  const divisionStandings = {};
+  for (const standing of state.standings) {
+    const divisionId = String(state.rostersById[standing.rosterId]?.settings?.division || "");
+    if (!divisionId) continue;
+    if (!divisionStandings[divisionId]) divisionStandings[divisionId] = [];
+    divisionStandings[divisionId].push(standing);
+  }
+
+  const rivalryKeys = new Set(parseRivalries().map((rivalry) => String(rivalry)
+    .split("|")
+    .map((name) => name.trim().toLowerCase())
+    .sort()
+    .join("|")));
+  const importantGames = [];
+
+  for (const game of state.weeklyMatchups) {
+    if (game.teams.length < 2) continue;
+    const [first, second] = game.teams;
+    const labels = [];
+    const rivalryKey = [first.manager, second.manager].map((name) => name.toLowerCase()).sort().join("|");
+    if (rivalryKeys.has(rivalryKey)) labels.push("Rivalry game");
+
+    if (state.selectedWeek === state.currentWeek) {
+      const overallRanks = [standingsByRoster[first.rosterId]?.rank, standingsByRoster[second.rosterId]?.rank]
+        .filter(Number.isFinite)
+        .sort((a, b) => a - b);
+      if (overallRanks[0] === 1 && overallRanks[1] === 2) labels.push("League first-place battle");
+      if (overallRanks[0] === state.standings.length - 1 && overallRanks[1] === state.standings.length) {
+        labels.push("League last-place battle");
+      }
+
+      const firstDivision = String(state.rostersById[first.rosterId]?.settings?.division || "");
+      const secondDivision = String(state.rostersById[second.rosterId]?.settings?.division || "");
+      if (firstDivision && firstDivision === secondDivision) {
+        const members = divisionStandings[firstDivision] || [];
+        const divisionRanks = [first.rosterId, second.rosterId]
+          .map((rosterId) => members.findIndex((member) => member.rosterId === rosterId) + 1)
+          .sort((a, b) => a - b);
+        const divisionName = state.league?.metadata?.[`division_${firstDivision}`] || `Division ${firstDivision}`;
+        if (divisionRanks[0] === 1 && divisionRanks[1] === 2) labels.push(`${divisionName} first-place battle`);
+        if (divisionRanks[0] === members.length - 1 && divisionRanks[1] === members.length) {
+          labels.push(`${divisionName} last-place battle`);
+        }
+      }
+    }
+
+    const margin = Math.abs(first.points - second.points);
+    const hasStarted = first.points > 0 || second.points > 0;
+    if (hasStarted && margin <= 10) {
+      labels.push(state.selectedWeek === state.currentWeek ? "Close game" : "Close finish");
+    }
+    if (labels.length) importantGames.push({ first, second, labels, margin });
+  }
+
+  if (!importantGames.length) {
+    root.innerHTML = '<div class="empty-state">No rivalry, standings, or close-game alerts for this week.</div>';
+    return;
+  }
+
+  root.innerHTML = importantGames.map(({ first, second, labels, margin }) => `
+    <article class="important-game">
+      <div class="important-game-tags">${labels.map((label) => `<span>${escapeHtml(label)}</span>`).join("")}</div>
+      <div class="important-game-score">
+        <strong>${escapeHtml(first.manager)}</strong>
+        <b>${n(first.points, 2)} <small>vs</small> ${n(second.points, 2)}</b>
+        <strong>${escapeHtml(second.manager)}</strong>
+      </div>
+      ${(first.points > 0 || second.points > 0) ? `<p>${n(margin, 2)}-point margin</p>` : '<p>Kickoff pending</p>'}
+    </article>
+  `).join("");
 }
 
 function renderOverviewKpis(weeklyGamesByWeek = []) {
@@ -432,6 +514,7 @@ function renderOverviewKpis(weeklyGamesByWeek = []) {
 
 function buildNewsItems() {
   const items = [];
+  const injuryItems = [];
 
   for (const row of parseRivalries()) {
     const [a, b] = String(row || "").split("|").map((x) => x.trim());
@@ -528,10 +611,11 @@ function buildNewsItems() {
       player,
       status,
       manager: managerNameFromRosterId(team.roster_id),
+      newsUpdated: Number(player.news_updated || 0),
       priority: (currentStarters.has(playerId) ? 100000 : 0) + Number(state.playerValues[playerId] || 0),
     };
   })).filter((row) => row.status && !["active", "healthy"].includes(row.status.toLowerCase()));
-  injuryRows.sort((a, b) => b.priority - a.priority);
+  injuryRows.sort((a, b) => (b.newsUpdated - a.newsUpdated) || (b.priority - a.priority));
   const statusWithArticle = (status) => `${/^[aeiou]/i.test(status) ? "an" : "a"} ${status}`;
   const usedInjuryJabs = new Set();
   for (const row of injuryRows.slice(0, 6)) {
@@ -541,15 +625,15 @@ function buildNewsItems() {
       usedInjuryJabs
     );
     const playerName = row.player.full_name || row.playerId;
-    items.push({
+    injuryItems.push({
       type: "Injury Wire",
-      body: `${playerName} picked up ${statusWithArticle(row.status)} tag. ${jab(row)}`,
+      body: `${playerName} picked up ${statusWithArticle(row.status)} tag. ${jab(row)}${row.newsUpdated ? ` Updated ${dateLabel(row.newsUpdated)}.` : ""}`,
       image: getPlayerHeadshot(row.playerId, row.player),
       alt: `${row.player.full_name || "Injured player"} headshot`,
     });
   }
 
-  return items.slice(0, 26);
+  return [...injuryItems, ...items].slice(0, 26);
 }
 
 function renderNewsFeed() {
@@ -1111,6 +1195,9 @@ function renderManagerDetails(ownerId) {
   const lineupMisses = [];
   const currentSeason = state.history[0];
   if (currentSeason) {
+    const activeSlots = safeArray(currentSeason.league?.roster_positions).filter(
+      (slot) => !["BN", "IR", "TAXI"].includes(String(slot).toUpperCase())
+    );
     const ownerToRoster = {};
     for (const r of currentSeason.rosters) ownerToRoster[String(r.owner_id)] = String(r.roster_id);
     const targetRosterId = ownerToRoster[String(ownerId)];
@@ -1120,20 +1207,33 @@ function renderManagerDetails(ownerId) {
         if (!team) continue;
 
         const starters = new Set(team.starters.map(String));
-        const starterRows = team.starters.map((pid) => ({ pid, points: Number(team.playersPoints?.[pid] || 0) }));
+        const starterRows = team.starters.map((pid, index) => ({
+          pid,
+          slot: activeSlots[index] || state.playersById[pid]?.position || "",
+          points: Number(team.playersPoints?.[pid] || 0),
+        }));
         const benchRows = team.players
           .filter((pid) => !starters.has(String(pid)))
-          .map((pid) => ({ pid, points: Number(team.playersPoints?.[pid] || 0) }));
+          .map((pid) => ({
+            pid,
+            position: state.playersById[pid]?.position || "",
+            points: Number(team.playersPoints?.[pid] || 0),
+          }));
         if (!starterRows.length || !benchRows.length) continue;
 
-        const lowestStarter = starterRows.sort((a, b) => a.points - b.points)[0];
-        const bestBench = benchRows.sort((a, b) => b.points - a.points)[0];
-        if (bestBench.points > lowestStarter.points) {
+        const legalSwaps = starterRows.flatMap((starter) => benchRows
+          .filter((bench) => eligibleForSlot(bench.position, starter.slot))
+          .map((bench) => ({ starter, bench, missed: bench.points - starter.points })))
+          .filter((swap) => swap.missed > 0)
+          .sort((a, b) => b.missed - a.missed);
+        const worstSwap = legalSwaps[0];
+        if (worstSwap) {
           lineupMisses.push({
             week: week.week,
-            bench: state.playersById[bestBench.pid]?.full_name || bestBench.pid,
-            starter: state.playersById[lowestStarter.pid]?.full_name || lowestStarter.pid,
-            missed: bestBench.points - lowestStarter.points,
+            bench: state.playersById[worstSwap.bench.pid]?.full_name || worstSwap.bench.pid,
+            starter: state.playersById[worstSwap.starter.pid]?.full_name || worstSwap.starter.pid,
+            slot: worstSwap.starter.slot,
+            missed: worstSwap.missed,
           });
         }
       }
@@ -1213,7 +1313,7 @@ function renderManagerDetails(ownerId) {
       </div>
       <div class="card">
         <h4>Worst Lineup Decisions</h4>
-        <ul>${lineupMisses.slice(0, 5).map((m) => `<li>W${m.week}: Started ${m.starter} over ${m.bench} (missed ${n(m.missed, 2)})</li>`).join("") || "<li>No major missed decisions found.</li>"}</ul>
+        <ul>${lineupMisses.slice(0, 5).map((m) => `<li>W${m.week} ${escapeHtml(m.slot)}: Started ${escapeHtml(m.starter)} over ${escapeHtml(m.bench)} (missed ${n(m.missed, 2)})</li>`).join("") || "<li>No major missed decisions found.</li>"}</ul>
       </div>
     </div>
     <section class="manager-trade-history">
@@ -1383,6 +1483,167 @@ async function renderTradeBlockPage() {
     .join("") : '<div class="empty-state">No players are currently on the Sleeper trade block.</div>';
 }
 
+function currentManagerName(ownerId, historicalUser = {}) {
+  const currentUser = state.usersById[String(ownerId)] || {};
+  return currentUser.display_name || currentUser.username
+    || historicalUser.display_name || historicalUser.username
+    || "Former manager";
+}
+
+function rivalryIdentity(managerName) {
+  const standing = state.standings.find(
+    (row) => row.manager.toLowerCase() === String(managerName).toLowerCase()
+  );
+  if (!standing) return { name: managerName, image: "", rosterId: "", record: "N/A" };
+  return {
+    ...managerIdentityFromRosterId(standing.rosterId),
+    rosterId: standing.rosterId,
+    record: standing.record,
+  };
+}
+
+async function initDivisionsPage() {
+  renderLoading("Loading division archives");
+  const regularSeasonEnd = Math.max(state.currentWeek, playoffWeek(state.league) - 1);
+  const [history, futureSchedule] = await Promise.all([
+    getLeagueHistory(state.leagueId, 50),
+    Promise.all(Array.from(
+      { length: regularSeasonEnd - state.currentWeek + 1 },
+      async (_, index) => {
+        const week = state.currentWeek + index;
+        const rawMatchups = await getMatchups(state.leagueId, week).catch(() => []);
+        return {
+          week,
+          games: buildWeeklyMatchups(rawMatchups, state.rostersById, state.usersById),
+        };
+      }
+    )),
+  ]);
+  const careerMap = new Map();
+  const seasons = history.map((season) => {
+    const historicalUsers = mapUsers(season.users);
+    const completed = String(season.league?.status || "").toLowerCase() === "complete";
+    const divisionCount = Number(season.league?.settings?.divisions || 0);
+    const divisions = Array.from({ length: divisionCount }, (_, index) => {
+      const divisionId = String(index + 1);
+      const members = safeArray(season.rosters)
+        .filter((roster) => String(roster.settings?.division || "") === divisionId)
+        .map((roster) => {
+          const ownerId = String(roster.owner_id || "");
+          const manager = currentManagerName(ownerId, historicalUsers[ownerId]);
+          const wins = Number(roster.settings?.wins || 0);
+          const losses = Number(roster.settings?.losses || 0);
+          const ties = Number(roster.settings?.ties || 0);
+          const pointsFor = Number(roster.settings?.fpts || 0)
+            + Number(roster.settings?.fpts_decimal || 0) / 100;
+          const career = careerMap.get(ownerId) || {
+            ownerId,
+            manager,
+            seasons: 0,
+            titles: 0,
+            wins: 0,
+            losses: 0,
+            ties: 0,
+            pointsFor: 0,
+          };
+          career.manager = manager;
+          career.seasons += 1;
+          career.wins += wins;
+          career.losses += losses;
+          career.ties += ties;
+          career.pointsFor += pointsFor;
+          careerMap.set(ownerId, career);
+          return {
+            ownerId,
+            manager,
+            wins,
+            losses,
+            ties,
+            pointsFor,
+          };
+        })
+        .sort((a, b) => (b.wins - a.wins) || (b.pointsFor - a.pointsFor) || a.manager.localeCompare(b.manager));
+
+      if (completed && members[0]) careerMap.get(members[0].ownerId).titles += 1;
+      return {
+        id: divisionId,
+        name: season.league?.metadata?.[`division_${divisionId}`] || `Division ${divisionId}`,
+        avatar: season.league?.metadata?.[`division_${divisionId}_avatar`] || "",
+        members,
+        averagePointsFor: average(members.map((member) => member.pointsFor)),
+      };
+    });
+    const championDivision = [...divisions].sort(
+      (a, b) => b.averagePointsFor - a.averagePointsFor
+    )[0] || null;
+    return {
+      season: String(season.league?.season || ""),
+      completed,
+      divisions,
+      championDivision,
+    };
+  });
+
+  const historyRoot = qs("#division-history-root");
+  if (historyRoot) {
+    historyRoot.innerHTML = seasons.map((season) => `
+      <article class="division-season">
+        <header class="division-season-header">
+          <h3>${escapeHtml(season.season)} Season</h3>
+          <span class="badge">${season.completed ? "Final" : "In Progress"}</span>
+        </header>
+        ${season.championDivision ? `<div class="division-champion">
+          <span>Champion Division · Average Points For</span>
+          <strong>${escapeHtml(season.championDivision.name)}</strong>
+          <b>${n(season.championDivision.averagePointsFor, 2)} PF</b>
+        </div>` : ""}
+        <div class="division-grid">
+          ${season.divisions.map((division) => `
+            <section class="division-card">
+              <header class="division-card-header">
+                ${division.avatar ? `<img src="${escapeHtml(division.avatar)}" alt="" loading="lazy" />` : ""}
+                <div><span>Division ${division.id}</span><h4>${escapeHtml(division.name)}</h4></div>
+              </header>
+              ${division.members[0] ? `<p class="division-leader"><span>${season.completed ? "Winner" : "Current leader"}</span><strong>${escapeHtml(division.members[0].manager)}</strong></p>` : ""}
+              <p class="division-value"><span>Average points for</span><strong>${n(division.averagePointsFor, 2)} PF</strong></p>
+              <div class="table-wrap"><table>
+                <thead><tr><th>#</th><th>Manager</th><th>Record</th><th>PF</th></tr></thead>
+                <tbody>${division.members.map((member, index) => `<tr><td>${index + 1}</td><td>${escapeHtml(member.manager)}</td><td>${member.wins}-${member.losses}${member.ties ? `-${member.ties}` : ""}</td><td>${n(member.pointsFor, 2)}</td></tr>`).join("")}</tbody>
+              </table></div>
+            </section>`).join("")}
+        </div>
+      </article>`).join("") || '<div class="empty-state">No division history found.</div>';
+  }
+
+  const careerBody = qs("#division-careers-body");
+  if (careerBody) {
+    careerBody.innerHTML = [...careerMap.values()]
+      .sort((a, b) => (b.titles - a.titles) || (b.wins - a.wins) || (b.pointsFor - a.pointsFor))
+      .map((row) => `<tr><td>${escapeHtml(row.manager)}</td><td>${row.seasons}</td><td>${row.titles}</td><td>${row.wins}-${row.losses}${row.ties ? `-${row.ties}` : ""}</td><td>${n(row.pointsFor, 2)}</td></tr>`)
+      .join("");
+  }
+
+  const rivalryGrid = qs("#rivalry-grid");
+  if (rivalryGrid) {
+    rivalryGrid.innerHTML = parseRivalries().map((rivalry) => {
+      const [firstName, secondName] = rivalry.split("|");
+      const first = rivalryIdentity(firstName);
+      const second = rivalryIdentity(secondName);
+      const nextMeeting = futureSchedule.find((weekly) => weekly.games.some((game) => {
+        const rosterIds = game.teams.map((team) => team.rosterId);
+        return rosterIds.includes(first.rosterId) && rosterIds.includes(second.rosterId);
+      }));
+      return `<article class="rivalry-card">
+        <div>${first.image ? `<img class="manager-avatar" src="${escapeHtml(first.image)}" alt="" loading="lazy" />` : ""}<strong>${escapeHtml(first.name)}</strong><span class="rivalry-record">${escapeHtml(first.record)}</span></div>
+        <span>VS</span>
+        <div>${second.image ? `<img class="manager-avatar" src="${escapeHtml(second.image)}" alt="" loading="lazy" />` : ""}<strong>${escapeHtml(second.name)}</strong><span class="rivalry-record">${escapeHtml(second.record)}</span></div>
+        <p class="rivalry-next">${nextMeeting ? `Next meeting: Week ${nextMeeting.week}${nextMeeting.week === state.currentWeek ? " · This week" : ""}` : "No remaining regular-season meeting scheduled"}</p>
+      </article>`;
+    }).join("");
+  }
+  clearLoading();
+}
+
 function initStaticConfigPanels() {
   const leaguePinned = qs("#league-id-pinned");
   if (leaguePinned) leaguePinned.textContent = state.leagueId;
@@ -1415,6 +1676,7 @@ async function boot() {
     if (page === "dashboard") await initDashboard();
     if (page === "analytics") await initAnalyticsPage();
     if (page === "managers") await initManagersPage();
+    if (page === "divisions") await initDivisionsPage();
     if (page === "players") await initPlayerPage();
     if (page === "trade-block") await renderTradeBlockPage();
   } catch (error) {

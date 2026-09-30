@@ -13,6 +13,7 @@ Custom fantasy football league site with a sharp-edged heavy-metal and fire visu
 - `index.html`: league dashboard, historical week selector, standings, matchups, news feed, and weekly recap
 - `analytics.html`: advanced team, trade, age, performance, and strength-of-schedule metrics
 - `managers.html`: manager history, awards, head-to-head, draft/value profile
+- `divisions.html`: season-by-season division assignments, winners, career records, and rivalries
 - `players.html`: player-level started performance and ownership movement
 - `trade-block.html`: active trade block ranking with visible roster-fit recommendations
 

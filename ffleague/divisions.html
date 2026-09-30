@@ -3,22 +3,22 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="League trade block board ranked by desirability and fit-based demand signals." />
+  <meta name="description" content="Fantasy league division history, winners, standings, and rivalry registry." />
   <meta name="theme-color" content="#0d0b0a" />
-  <title>FF League | Trade Block</title>
+  <title>FF League | Division History</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Karla:wght@400;500;600;700;800&family=Pirata+One&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="assets/styles.css" />
 </head>
-<body data-page="trade-block">
+<body data-page="divisions">
   <div class="page-shell">
     <header class="site-header">
       <div class="brand-line">
         <div>
           <p class="brand-kicker">Austin Pico / League Operations</p>
           <h1 class="brand-title"><span id="league-name">Football Fellas</span></h1>
-          <p class="brand-sub"><span id="league-season"></span> / <span id="week-label"></span> / Trade Block</p>
+          <p class="brand-sub"><span id="league-season"></span> / <span id="week-label"></span> / Division History</p>
         </div>
         <a class="home-link" href="../index.html">Back to Projects</a>
       </div>
@@ -36,14 +36,38 @@
     <div id="loading-slot"></div>
 
     <section class="panel">
-      <h2 class="panel-title">Active Trade Block Board</h2>
-      <p class="mini-note">Live Sleeper trade-block players, ordered by market value. Roster construction and positional scarcity determine each player's strongest league fit.</p>
-      <div id="trade-block-root" class="grid-3"></div>
+      <h2 class="panel-title">Division Timeline</h2>
+      <p class="mini-note">Completed seasons show division winners; the active season shows current leaders. Champion Division is the division with the highest average team Points For.</p>
+      <div id="division-history-root" class="division-history"></div>
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title">All-Time Division Records</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Manager</th>
+              <th>Division Seasons</th>
+              <th>Division Titles</th>
+              <th>Record</th>
+              <th>Points For</th>
+            </tr>
+          </thead>
+          <tbody id="division-careers-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2 class="panel-title">Rivalry Registry</h2>
+      <p class="mini-note">Records are live. Next meetings use the current Sleeper regular-season schedule.</p>
+      <div id="rivalry-grid" class="rivalry-grid"></div>
     </section>
 
     <footer class="footer">
       <a href="../index.html">Austin Pico Projects</a>
-      Desirability rankings blend market-style player value with roster-need fit calculations.
+      Division assignments, records, and names come from linked Sleeper league seasons.
     </footer>
   </div>
 

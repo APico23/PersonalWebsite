@@ -93,7 +93,7 @@ function scoreProjectedPlayer(projection, scoringSettings, position) {
   return score;
 }
 
-function eligibleForSlot(position, slot) {
+export function eligibleForSlot(position, slot) {
   const pos = String(position || "").toUpperCase();
   const target = String(slot || "").toUpperCase();
   if (pos === target || (pos === "DST" && target === "DEF")) return true;
@@ -555,8 +555,9 @@ export function managerAwards(historyBundles, ownerId) {
   let biggestBlowout = 0;
 
   for (const season of historyBundles) {
+    const seasonComplete = String(season.league?.status || "").toLowerCase() === "complete";
     const standings = season.standings || [];
-    if (standings[0]?.ownerId === String(ownerId)) regularSeasonTitles += 1;
+    if (seasonComplete && standings[0]?.ownerId === String(ownerId)) regularSeasonTitles += 1;
 
     const ownerToRoster = {};
     for (const r of safeArray(season.rosters)) ownerToRoster[String(r.owner_id)] = String(r.roster_id);
@@ -582,12 +583,10 @@ export function managerAwards(historyBundles, ownerId) {
 
     if (appearedInPlayoffs) playoffApps += 1;
 
-    const champsBracket = safeArray(season.brackets?.winners).filter((row) => Number(row.r) > 0);
-    const finalRound = champsBracket.reduce((mx, row) => Math.max(mx, Number(row.r || 0)), 0);
-    const finalGames = champsBracket.filter((row) => Number(row.r) === finalRound);
-    for (const game of finalGames) {
-      if (String(game.w) === rosterId) championships += 1;
-    }
+    const championshipGame = seasonComplete
+      ? safeArray(season.brackets?.winners).find((row) => Number(row.p) === 1)
+      : null;
+    if (String(championshipGame?.w || "") === rosterId) championships += 1;
   }
 
   return {
