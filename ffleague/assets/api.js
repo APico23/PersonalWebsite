@@ -105,13 +105,24 @@ export async function getTransactions(leagueId, week) {
 }
 
 export async function getDraftPicks(leagueId) {
-  const cacheKey = `ffl_cache_draftpicks_${leagueId}`;
+  const cacheKey = `ffl_cache_draftpicks_v3_${leagueId}`;
   const cached = getCache(cacheKey);
   if (cached) return cached;
 
   const drafts = await fetchJson(`${SLEEPER_BASE}/league/${leagueId}/drafts`);
   const picksPerDraft = await Promise.all(
-    drafts.map((draft) => fetchJson(`${SLEEPER_BASE}/draft/${draft.draft_id}/picks`).catch(() => []))
+    drafts.map(async (draft) => {
+      const [draftDetail, picks] = await Promise.all([
+        fetchJson(`${SLEEPER_BASE}/draft/${draft.draft_id}`).catch(() => draft),
+        fetchJson(`${SLEEPER_BASE}/draft/${draft.draft_id}/picks`).catch(() => []),
+      ]);
+      const slotMap = draftDetail.slot_to_roster_id || {};
+      return picks.map((pick) => ({
+        ...pick,
+        draftSeason: String(draft.season || ""),
+        originalRosterId: String(slotMap[String(pick.draft_slot)] || ""),
+      }));
+    })
   );
   const picks = picksPerDraft.flat();
   setCache(cacheKey, picks, 60 * 60 * 1000);

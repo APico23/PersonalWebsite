@@ -293,7 +293,6 @@ export function weeklySummary(matchupRows) {
     otherGames,
   };
 }
-
 export function teamCompositionMetrics(rosters, playersById, usersById) {
   const metrics = [];
 
@@ -356,7 +355,13 @@ export function ageMetrics(rosters, playersById, usersById) {
   return rows.sort((a, b) => b.averageAge - a.averageAge);
 }
 
-export function collectTrades(allTransactions, usersById, rostersById, playersById, playerValues) {
+function futurePickValue(pick, currentSeason) {
+  const roundValues = { 1: 6000, 2: 3000, 3: 1500, 4: 750, 5: 400 };
+  const yearsOut = Math.max(0, Number(pick?.season || currentSeason) - Number(currentSeason || 0));
+  return Math.round((roundValues[Number(pick?.round)] || 250) * (0.88 ** yearsOut));
+}
+
+export function collectTrades(allTransactions, usersById, rostersById, playersById, playerValues, draftPicks, currentSeason, leagueId = "") {
   const trades = [];
 
   for (const tx of safeArray(allTransactions)) {
@@ -364,19 +369,58 @@ export function collectTrades(allTransactions, usersById, rostersById, playersBy
 
     const adds = tx.adds || {};
     const byManager = {};
+    const ensureParty = (rosterId) => {
+      const rid = String(rosterId || "");
+      if (!rid) return null;
+      if (!byManager[rid]) byManager[rid] = { assetsIn: [], inValue: 0 };
+      return byManager[rid];
+    };
+
+    for (const rosterId of safeArray(tx.roster_ids)) ensureParty(rosterId);
 
     for (const [pid, rosterId] of Object.entries(adds)) {
       const rid = String(rosterId);
-      if (!byManager[rid]) byManager[rid] = { playersIn: [], playersOut: [], inValue: 0, outValue: 0 };
-      byManager[rid].playersIn.push(pid);
-      byManager[rid].inValue += Number(playerValues[pid] || 0);
+      const value = Number(playerValues[pid] || 0);
+      const player = playersById[pid] || {};
+      const party = ensureParty(rid);
+      party.assetsIn.push({
+        type: "player",
+        playerId: String(pid),
+        name: player.full_name || player.last_name || "Unknown player",
+        position: player.position || "",
+        value,
+      });
+      party.inValue += value;
     }
 
-    for (const [pid, rosterId] of Object.entries(tx.drops || {})) {
-      const rid = String(rosterId);
-      if (!byManager[rid]) byManager[rid] = { playersIn: [], playersOut: [], inValue: 0, outValue: 0 };
-      byManager[rid].playersOut.push(pid);
-      byManager[rid].outValue += Number(playerValues[pid] || 0);
+    for (const pick of safeArray(tx.draft_picks)) {
+      const party = ensureParty(pick.owner_id);
+      if (!party) continue;
+      const selectedPick = safeArray(draftPicks).find((draftPick) => (
+        String(draftPick.draftSeason || "") === String(pick.season || "")
+        && String(draftPick.originalRosterId || "") === String(pick.roster_id || "")
+        && Number(draftPick.round || 0) === Number(pick.round || 0)
+      ));
+      const selectedPlayerId = String(selectedPick?.player_id || "");
+      const selectedPlayer = playersById[selectedPlayerId] || {};
+      const value = selectedPlayerId
+        ? Number(playerValues[selectedPlayerId] || 0)
+        : futurePickValue(pick, currentSeason);
+      party.assetsIn.push(selectedPlayerId ? {
+        type: "used-pick",
+        season: String(pick.season || ""),
+        round: Number(pick.round || 0),
+        playerId: selectedPlayerId,
+        name: selectedPlayer.full_name || selectedPlayer.last_name || "Unknown player",
+        position: selectedPlayer.position || "",
+        value,
+      } : {
+        type: "pick",
+        season: String(pick.season || ""),
+        round: Number(pick.round || 0),
+        value,
+      });
+      party.inValue += value;
     }
 
     const parties = Object.entries(byManager).map(([rid, payload]) => {
@@ -384,25 +428,30 @@ export function collectTrades(allTransactions, usersById, rostersById, playersBy
       const rosterUser = usersById[String(roster.owner_id)] || null;
       return {
         rosterId: rid,
+        ownerId: String(roster.owner_id || ""),
         manager: rosterUser?.display_name || `Roster ${rid}`,
+        avatarId: String(rosterUser?.avatar || ""),
         ...payload,
       };
     });
 
-    const totalDiff = parties.reduce((acc, p) => acc + Math.abs((p.inValue || 0) - (p.outValue || 0)), 0);
-    const normalized = parties.length ? totalDiff / parties.length : 0;
+    const averageReceived = average(parties.map((party) => party.inValue));
+    const imbalance = parties.length
+      ? average(parties.map((party) => Math.abs(party.inValue - averageReceived)))
+      : 0;
 
     trades.push({
       transactionId: String(tx.transaction_id),
       statusUpdated: Number(tx.status_updated || 0),
+      season: String(currentSeason || ""),
+      leagueId: String(leagueId || ""),
       parties,
-      fairnessDelta: normalized,
-      score: Math.max(0, 100 - normalized / 10),
+      imbalance,
       raw: tx,
     });
   }
 
-  trades.sort((a, b) => a.fairnessDelta - b.fairnessDelta);
+  trades.sort((a, b) => a.imbalance - b.imbalance);
 
   return {
     ranked: trades,
@@ -679,11 +728,12 @@ export function weeklyAllStars(matchups, playersById) {
   return Object.values(bestByPos).sort((a, b) => b.score - a.score);
 }
 
-export function managerTradeProfile(trades, rosterId) {
-  const mine = trades.filter((t) => t.parties.some((p) => String(p.rosterId) === String(rosterId)));
+export function managerTradeProfile(trades, ownerId) {
+  const mine = trades.filter((t) => t.parties.some((p) => String(p.ownerId) === String(ownerId)));
   const deltas = mine.map((t) => {
-    const me = t.parties.find((p) => String(p.rosterId) === String(rosterId));
-    return (me?.inValue || 0) - (me?.outValue || 0);
+    const me = t.parties.find((p) => String(p.ownerId) === String(ownerId));
+    const averagePackage = average(t.parties.map((party) => party.inValue));
+    return (me?.inValue || 0) - averagePackage;
   });
 
   return {
@@ -733,20 +783,19 @@ export function playerStartedStats(historyBundles, playerId, ownerToManagerNameR
   };
 }
 
-export function buildFuturePickTracking(rosters, draftPicks) {
-  const byOwner = {};
-  for (const p of safeArray(draftPicks)) {
-    const owner = String(p.picked_by || p.roster_id || "");
-    if (!byOwner[owner]) byOwner[owner] = [];
-    byOwner[owner].push({
-      round: Number(p.round || 0),
-      playerId: String(p.player_id || ""),
-      metadata: p.metadata || {},
-    });
+export function managerTradeRankings(trades) {
+  const managers = new Map();
+  for (const trade of safeArray(trades)) {
+    for (const party of trade.parties) {
+      if (party.ownerId) managers.set(party.ownerId, party.manager);
+    }
   }
 
-  return safeArray(rosters).map((r) => ({
-    rosterId: String(r.roster_id),
-    picks: byOwner[String(r.owner_id)] || [],
-  }));
+  return [...managers.entries()]
+    .map(([ownerId, manager]) => ({ ownerId, manager, ...managerTradeProfile(trades, ownerId) }))
+    .filter((row) => row.tradeFrequency > 0)
+    .sort((a, b) => (b.avgValueDiff - a.avgValueDiff) || (b.tradeSuccessRate - a.tradeSuccessRate))
+    .map((row, index, rows) => ({ ...row, rank: index + 1, fieldSize: rows.length }));
 }
+
+  export const TRADE_RANKING_DESCRIPTION = "Managers rank by average current-value advantage over the other packages in their trades. Higher is better.";

@@ -16,7 +16,6 @@ import {
 import { ACTIVE_TRADE_BLOCK_IDS, MANAGER_IMAGES, RIVALRIES } from "./config.js";
 import {
   ageMetrics,
-  buildFuturePickTracking,
   buildPerformanceMetrics,
   buildRosterProjectionScores,
   buildWeeklyMatchups,
@@ -25,6 +24,8 @@ import {
   computeStandings,
   managerAwards,
   managerTradeProfile,
+  managerTradeRankings,
+  TRADE_RANKING_DESCRIPTION,
   mapRosters,
   mapUsers,
   playerOwnershipTimeline,
@@ -304,6 +305,7 @@ async function loadHistoryData(maxSeasons = 4) {
       standings: computeStandings(season.rosters, usersById),
       weekly: [],
       transactions: [],
+      draftPicks: [],
       brackets: { winners: [], losers: [] },
     };
 
@@ -329,7 +331,10 @@ async function loadHistoryData(maxSeasons = 4) {
     seasonState.weekly = weekRows.map(({ week, games }) => ({ week, games }));
     seasonState.transactions = weekRows.map(({ week, transactions }) => ({ week, items: transactions }));
 
-    seasonState.brackets = await getBrackets(season.leagueId);
+    [seasonState.brackets, seasonState.draftPicks] = await Promise.all([
+      getBrackets(season.leagueId),
+      getDraftPicks(season.leagueId).catch(() => []),
+    ]);
     out.push(seasonState);
   }
 
@@ -728,7 +733,7 @@ function drawBarChart(canvas, labels, values, color = "#ff4d00") {
   });
 }
 
-function renderAnalyticsCharts(weeklyGamesByWeek, perfRows) {
+function renderAnalyticsCharts(weeklyGamesByWeek, perfRows, historicalWeeks = []) {
   const trendCanvas = qs("#trend-chart");
   const consistencyCanvas = qs("#consistency-chart");
   if (!trendCanvas || !consistencyCanvas) return;
@@ -742,19 +747,99 @@ function renderAnalyticsCharts(weeklyGamesByWeek, perfRows) {
     const scores = w.games.flatMap((g) => g.teams.map((t) => t.points));
     return scores.length ? Math.max(...scores) : 0;
   });
+  const historicalAverageByWeek = Object.fromEntries(historicalWeeks.map((weekly) => {
+    const scores = weekly.games.flatMap((game) => game.teams.map((team) => team.points));
+    return [weekly.week, average(scores)];
+  }));
+  const historicalLeagueAvg = weeklyGamesByWeek.map((weekly) => historicalAverageByWeek[weekly.week] || 0);
 
   drawLineChart(trendCanvas, labels, [
     { color: "#ffbf00", values: leagueAvg },
     { color: "#ff4d00", values: weeklyCeiling },
+    { color: "#e8dfc8", values: historicalLeagueAvg },
   ]);
 
-  const topConsistency = perfRows.slice(0, 8);
+  const topConsistency = [...perfRows]
+    .sort((a, b) => b.consistency - a.consistency)
+    .slice(0, 8);
   drawBarChart(
     consistencyCanvas,
     topConsistency.map((r) => r.manager),
     topConsistency.map((r) => r.consistency),
     "#35d07f"
   );
+}
+
+function collectAllTimeTradeAnalytics() {
+  const uniqueTrades = new Map();
+  const allDraftPicks = state.history.flatMap((season) => safeArray(season.draftPicks));
+
+  for (const season of state.history) {
+    const transactions = safeArray(season.transactions).flatMap((weekly) => safeArray(weekly.items));
+    const seasonTrades = collectTrades(
+      transactions,
+      season.usersById,
+      season.rostersById,
+      state.playersById,
+      state.playerValues,
+      allDraftPicks,
+      season.league?.season,
+      season.leagueId
+    ).ranked;
+    for (const trade of seasonTrades) uniqueTrades.set(trade.transactionId, trade);
+  }
+
+  const ranked = [...uniqueTrades.values()]
+    .sort((a, b) => a.imbalance - b.imbalance)
+    .map((trade, index) => ({ ...trade, allTimeRank: index + 1 }));
+
+  return {
+    ranked,
+    best: ranked[0] || null,
+    worst: ranked[ranked.length - 1] || null,
+  };
+}
+
+function tradePartyIdentity(party) {
+  const customImage = MANAGER_IMAGES[String(party.ownerId)] || MANAGER_IMAGES[party.manager];
+  return {
+    name: party.manager,
+    image: customImage || getManagerAvatar(party.avatarId),
+  };
+}
+
+function renderTradeCards(trades) {
+  return safeArray(trades).map((trade) => `
+    <article class="trade-log-card">
+      <header class="trade-log-header">
+        <div><span class="trade-rank">#${trade.allTimeRank}</span><span>${escapeHtml(trade.season)} season · ${escapeHtml(dateLabel(trade.statusUpdated))}</span></div>
+        <div class="imbalance-value"><span>Imbalance</span><strong>${n(trade.imbalance, 0)}</strong></div>
+      </header>
+      <div class="trade-parties">
+        ${trade.parties.map((party) => {
+          const identity = tradePartyIdentity(party);
+          return `<section class="trade-party">
+            <div class="trade-manager">
+              ${identity.image ? `<img class="manager-avatar trade-manager-avatar" src="${escapeHtml(identity.image)}" alt="" loading="lazy" />` : ""}
+              <div><span>Received by</span><strong>${escapeHtml(identity.name)}</strong></div>
+              <b>${n(party.inValue, 0)}</b>
+            </div>
+            <div class="trade-assets">
+              ${party.assetsIn.map((asset) => {
+                if (asset.type === "pick") {
+                  return `<div class="trade-asset pick-asset"><div class="pick-mark"><span class="pick-year">${escapeHtml(asset.season)}</span><span class="pick-round">R${asset.round}</span></div><div><strong>Future draft pick</strong><span>Estimated value ${n(asset.value, 0)}</span></div></div>`;
+                }
+                const player = state.playersById[asset.playerId] || {};
+                const pickLabel = asset.type === "used-pick"
+                  ? `<span class="pick-origin"><b class="pick-year">${escapeHtml(asset.season)}</b> <b class="pick-round">R${asset.round}</b> became</span>`
+                  : "";
+                return `<div class="trade-asset player-asset"><img src="${escapeHtml(getPlayerHeadshot(asset.playerId, player))}" alt="${escapeHtml(asset.name)}" loading="lazy" /><div>${pickLabel}<strong>${escapeHtml(asset.name)}</strong><span>${escapeHtml(asset.position)} · Value ${n(asset.value, 0)}</span></div></div>`;
+              }).join("") || '<div class="mini-note">No valued assets recorded.</div>'}
+            </div>
+          </section>`;
+        }).join("")}
+      </div>
+    </article>`).join("");
 }
 
 async function initDashboard() {
@@ -824,36 +909,36 @@ async function initDashboard() {
 async function initAnalyticsPage() {
   renderLoading("Crunching advanced metrics");
 
+  await loadHistoryData(50);
+
   const weeklyGamesByWeek = [];
-  const allTransactions = [];
   const maxWeek = Math.max(state.currentWeek, playoffWeek(state.league) - 1);
 
   const weekRows = await Promise.all(
     Array.from({ length: maxWeek }, async (_, index) => {
       const week = index + 1;
-      const [rawGames, transactions] = await Promise.all([
-        getMatchups(state.leagueId, week).catch(() => []),
-        getTransactions(state.leagueId, week).catch(() => []),
-      ]);
+      const rawGames = await getMatchups(state.leagueId, week).catch(() => []);
       return {
         week,
         games: buildWeeklyMatchups(rawGames, state.rostersById, state.usersById),
-        transactions: safeArray(transactions),
       };
     })
   );
   weeklyGamesByWeek.push(...weekRows.map(({ week, games }) => ({ week, games })));
-  allTransactions.push(...weekRows.flatMap((row) => row.transactions));
 
-  state.tradeAnalytics = collectTrades(allTransactions, state.usersById, state.rostersById, state.playersById, state.playerValues);
+  const completedWeeks = weeklyGamesByWeek.filter((weekly) => (
+    weekly.week < state.currentWeek
+    && weekly.games.length > 0
+    && weekly.games.every((game) => game.teams.length >= 2 && game.teams.some((team) => team.points !== 0))
+  ));
+  const currentHistory = state.history.find((season) => season.leagueId === state.leagueId);
+  state.draftPicks = safeArray(currentHistory?.draftPicks);
+  state.tradeAnalytics = collectAllTimeTradeAnalytics();
   const composition = teamCompositionMetrics(state.rosters, state.playersById, state.usersById);
   const ages = ageMetrics(state.rosters, state.playersById, state.usersById);
-  const perf = buildPerformanceMetrics(weeklyGamesByWeek, state.standings, state.currentWeek);
-  const draftPicks = await getDraftPicks(state.leagueId);
-  state.draftPicks = draftPicks;
-  const futurePicks = buildFuturePickTracking(state.rosters, draftPicks);
+  const perf = buildPerformanceMetrics(completedWeeks, state.standings, state.currentWeek);
 
-  const allGames = weeklyGamesByWeek.flatMap((w) => w.games).filter((g) => g.teams.length >= 2);
+  const allGames = completedWeeks.flatMap((w) => w.games).filter((g) => g.teams.length >= 2);
   const sortedByMarginAsc = [...allGames].sort(
     (a, b) => Math.abs(a.teams[0].points - a.teams[1].points) - Math.abs(b.teams[0].points - b.teams[1].points)
   );
@@ -884,8 +969,8 @@ async function initAnalyticsPage() {
   if (overview) {
     overview.innerHTML = `
       <div class="card"><h4>Most NFL Teams Represented</h4><p>${composition.mostRepresented?.manager || "N/A"} with ${composition.mostRepresented?.teamCount || 0} teams.</p></div>
-      <div class="card"><h4>Best Trade Ever (Value Fairness)</h4><p>${state.tradeAnalytics.best ? `Trade #${state.tradeAnalytics.best.transactionId} fairness score ${n(state.tradeAnalytics.best.score, 1)}` : "No trades found."}</p></div>
-      <div class="card"><h4>Worst Trade Ever (Value Fairness)</h4><p>${state.tradeAnalytics.worst ? `Trade #${state.tradeAnalytics.worst.transactionId} fairness score ${n(state.tradeAnalytics.worst.score, 1)}` : "No trades found."}</p></div>
+      <div class="card"><h4>Most Even Trade (All Time)</h4><p>${state.tradeAnalytics.best ? `${state.tradeAnalytics.best.parties.map((party) => escapeHtml(party.manager)).join(" / ")} — ${n(state.tradeAnalytics.best.imbalance, 0)} imbalance` : "No trades found."}</p></div>
+      <div class="card"><h4>Most Lopsided Trade (All Time)</h4><p>${state.tradeAnalytics.worst ? `${state.tradeAnalytics.worst.parties.map((party) => escapeHtml(party.manager)).join(" / ")} — ${n(state.tradeAnalytics.worst.imbalance, 0)} imbalance` : "No trades found."}</p></div>
       <div class="card"><h4>League Age Snapshot</h4><p>Youngest average roster: ${ages.length ? ages[ages.length - 1].manager : "N/A"}. Oldest: ${ages[0]?.manager || "N/A"}.</p></div>
       <div class="card"><h4>Closest Recorded Matchups</h4><p>${sortedByMarginAsc.slice(0, 5).map((g) => `${g.teams[0].manager} vs ${g.teams[1].manager} (${n(Math.abs(g.teams[0].points - g.teams[1].points), 2)})`).join(" | ") || "No matchups yet."}</p></div>
       <div class="card"><h4>Biggest Blowouts</h4><p>${sortedByMarginDesc.slice(0, 5).map((g) => `${g.teams[0].manager} vs ${g.teams[1].manager} (${n(Math.abs(g.teams[0].points - g.teams[1].points), 2)})`).join(" | ") || "No matchups yet."}</p></div>
@@ -900,15 +985,10 @@ async function initAnalyticsPage() {
       .join("");
   }
 
-  const tradeBody = qs("#trade-body");
-  if (tradeBody) {
-    tradeBody.innerHTML = state.tradeAnalytics.ranked
-      .map((t, idx) => {
-        const pctFair = n(Math.max(0, 100 - t.fairnessDelta / 10), 1);
-        const detail = t.parties.map((p) => `${escapeHtml(p.manager)}: IN ${n(p.inValue, 0)} / OUT ${n(p.outValue, 0)}`).join(" | ");
-        return `<tr><td>${idx + 1}</td><td>${t.transactionId}</td><td>${n(t.fairnessDelta, 1)}</td><td>${pctFair}%</td><td>${detail}</td></tr>`;
-      })
-      .join("");
+  const tradeBoard = qs("#trade-board");
+  if (tradeBoard) {
+    tradeBoard.innerHTML = renderTradeCards(state.tradeAnalytics.ranked);
+    text(qs("#trade-summary-count"), `${state.tradeAnalytics.ranked.length} trades`);
   }
 
   const ageBody = qs("#age-body");
@@ -925,21 +1005,12 @@ async function initAnalyticsPage() {
       .join("");
   }
 
-  const picksBox = qs("#future-picks");
-  if (picksBox) {
-    picksBox.innerHTML = futurePicks
-      .map((r) => {
-        const manager = managerNameFromRosterId(r.rosterId);
-        const items = r.picks
-          .slice(0, 5)
-          .map((p) => `R${p.round}: ${state.playersById[p.playerId]?.full_name || p.playerId || "Unknown"}`)
-          .join(" | ");
-        return `<p><span class="badge">${escapeHtml(manager)}</span>${escapeHtml(items || "No draft pick mapping found.")}</p>`;
-      })
-      .join("");
-  }
-
-  renderAnalyticsCharts(weeklyGamesByWeek, perf);
+  const historical2025 = state.history.find((season) => String(season.league?.season) === "2025");
+  const historical2025Weeks = safeArray(historical2025?.weekly).filter((weekly) => (
+    weekly.games.length > 0
+    && weekly.games.every((game) => game.teams.length >= 2 && game.teams.some((team) => team.points !== 0))
+  ));
+  renderAnalyticsCharts(completedWeeks, perf, historical2025Weeks);
   clearLoading();
 }
 
@@ -965,8 +1036,6 @@ function renderManagerDetails(ownerId) {
   const out = qs("#manager-output");
   if (!out || !ownerId) return;
 
-  const ownerRosters = state.rosters.filter((r) => String(r.owner_id) === String(ownerId));
-  const rosterId = ownerRosters[0]?.roster_id;
   const myWeeklyScores = [];
   const allStartSamples = [];
   let allTimeWins = 0;
@@ -1012,7 +1081,12 @@ function renderManagerDetails(ownerId) {
     .sort((a, b) => b.avg - a.avg);
 
   const playoffs = managerAwards(state.history, ownerId);
-  const tradeProfile = managerTradeProfile(state.tradeAnalytics.ranked, String(rosterId || ""));
+  const tradeProfile = managerTradeProfile(state.tradeAnalytics.ranked, ownerId);
+  const tradeRanking = managerTradeRankings(state.tradeAnalytics.ranked)
+    .find((row) => row.ownerId === String(ownerId));
+  const managerTrades = state.tradeAnalytics.ranked
+    .filter((trade) => trade.parties.some((party) => party.ownerId === String(ownerId)))
+    .sort((a, b) => b.statusUpdated - a.statusUpdated);
   const seasonHistoryLines = state.history.map((h) => managerSeasonLine(ownerId, h)).filter(Boolean);
   const seasonalPlacements = state.history
     .map((h) => h.standings.find((x) => x.ownerId === String(ownerId))?.rank)
@@ -1128,10 +1202,12 @@ function renderManagerDetails(ownerId) {
         <ul>${gradedPicks.slice(-5).map((p) => `<li>R${p.round} ${p.name}: ${n(p.diff, 0)} value vs slot</li>`).join("") || "<li>No draft pick data.</li>"}</ul>
       </div>
       <div class="card">
-        <h4>Trading Profile</h4>
-        <p>Trade Frequency: ${tradeProfile.tradeFrequency}</p>
+        <h4>All-Time Trading Profile</h4>
+        <p>Trade Quality Rank: ${tradeRanking ? `#${tradeRanking.rank} of ${tradeRanking.fieldSize}` : "Not ranked"}</p>
+        <p>Total Trades: ${tradeProfile.tradeFrequency}</p>
         <p>Trade Success Rate: ${pct(tradeProfile.tradeSuccessRate, 1)}</p>
-        <p>Average Value Differential: ${n(tradeProfile.avgValueDiff, 1)}</p>
+        <p>Average Net Current Value: ${n(tradeProfile.avgValueDiff, 1)}</p>
+        <p class="mini-note">${TRADE_RANKING_DESCRIPTION}</p>
       </div>
       <div class="card">
         <h4>Head-to-Head Matrix</h4>
@@ -1142,23 +1218,23 @@ function renderManagerDetails(ownerId) {
         <ul>${lineupMisses.slice(0, 5).map((m) => `<li>W${m.week}: Started ${m.starter} over ${m.bench} (missed ${n(m.missed, 2)})</li>`).join("") || "<li>No major missed decisions found.</li>"}</ul>
       </div>
     </div>
+    <section class="manager-trade-history">
+      <h3 class="panel-title">All Trades Involving This Manager</h3>
+      <p class="metric-explainer">Each card keeps its all-time balance rank from the league trade log. Trades are listed newest first for this manager.</p>
+      <details class="trade-drawer" open>
+        <summary><span>Trade Log</span><span class="trade-summary-count">${managerTrades.length} trades</span></summary>
+        <div class="trade-scroll"><div class="trade-board">${renderTradeCards(managerTrades) || '<p class="mini-note">No recorded trades found for this manager.</p>'}</div></div>
+      </details>
+    </section>
   `;
 }
 
 async function initManagersPage() {
   renderLoading("Loading manager histories");
-  state.draftPicks = await getDraftPicks(state.leagueId);
-
-  const maxWeek = Math.max(state.currentWeek, playoffWeek(state.league) - 1);
-  const transactionWeeks = await Promise.all(
-    Array.from({ length: maxWeek }, (_, index) =>
-      getTransactions(state.leagueId, index + 1).catch(() => [])
-    )
-  );
-  const txRows = transactionWeeks.flatMap(safeArray);
-  state.tradeAnalytics = collectTrades(txRows, state.usersById, state.rostersById, state.playersById, state.playerValues);
-
-  await loadHistoryData(8);
+  await loadHistoryData(50);
+  const currentHistory = state.history.find((season) => season.leagueId === state.leagueId);
+  state.draftPicks = safeArray(currentHistory?.draftPicks);
+  state.tradeAnalytics = collectAllTimeTradeAnalytics();
   buildManagerSelect();
 
   const select = qs("#manager-select");

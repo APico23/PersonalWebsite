@@ -39,12 +39,12 @@
       <div class="grid-2">
         <div class="card">
           <h4>Weekly Scoring Trend</h4>
-          <p class="mini-note">Yellow: league average score, Orange: weekly high score.</p>
+          <p class="mini-note">Completed weeks only. Yellow: 2026 league average. Orange: 2026 weekly high. Bone: 2025 league average.</p>
           <canvas id="trend-chart" width="640" height="260" aria-label="Weekly scoring trend chart"></canvas>
         </div>
         <div class="card">
           <h4>Top Consistency Ratings</h4>
-          <p class="mini-note">Green bars show consistency score for top teams by average points.</p>
+          <p class="mini-note">Higher means steadier weekly scoring. Rating = 100 minus average points away from that team's weekly average.</p>
           <canvas id="consistency-chart" width="640" height="260" aria-label="Consistency bar chart"></canvas>
         </div>
       </div>
@@ -74,21 +74,12 @@
     </section>
 
     <section class="panel">
-      <h2 class="panel-title">Trade Fairness Rankings</h2>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Rank</th>
-              <th>Trade ID</th>
-              <th>Value Difference</th>
-              <th>Fairness</th>
-              <th>Impact Summary</th>
-            </tr>
-          </thead>
-          <tbody id="trade-body"></tbody>
-        </table>
-      </div>
+      <h2 class="panel-title">All-Time Trade Imbalance Rankings</h2>
+      <p class="metric-explainer"><strong>All linked seasons are included.</strong> Rank #1 is the most even trade. An imbalance of <span class="metric-zero">0</span> is perfectly even; higher values mean the received packages were farther apart in estimated FantasyCalc player and future-pick value.</p>
+      <details class="trade-drawer" open>
+        <summary><span>Trade Log</span><span id="trade-summary-count" class="trade-summary-count"></span></summary>
+        <div class="trade-scroll"><div id="trade-board" class="trade-board"></div></div>
+      </details>
     </section>
 
     <section class="panel">
@@ -113,6 +104,10 @@
 
     <section class="panel">
       <h2 class="panel-title">Consistency and Matchup Luck</h2>
+      <div class="metric-definitions">
+        <p><strong>Consistency rating</strong> starts at 100 and subtracts the team's average weekly distance from its own mean score. Higher is steadier; lower means more boom-or-bust. It measures predictability, not scoring strength.</p>
+        <p><strong>Luck differential</strong> adds 1 for each head-to-head win and subtracts 1 for each loss. Positive means the schedule produced more wins than losses; negative means the opposite. Read it beside average points, because it is not a manager-skill grade.</p>
+      </div>
       <div class="table-wrap">
         <table>
           <thead>
@@ -129,11 +124,6 @@
           <tbody id="performance-body"></tbody>
         </table>
       </div>
-    </section>
-
-    <section class="panel">
-      <h2 class="panel-title">Future Pick Tracking</h2>
-      <div id="future-picks"></div>
     </section>
 
     <footer class="footer">
