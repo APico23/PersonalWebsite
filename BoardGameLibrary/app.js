@@ -1427,24 +1427,93 @@ async function deletePlay(play) {
 }
 
 async function loadPlayerStatsPage() {
-  const [summaryResult, categoriesResult] = await Promise.all([
+  const dialog = document.getElementById("playerDialog");
+  document.getElementById("closePlayerDialog").addEventListener("click", () => dialog.close());
+  dialog.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dialog.close();
+    }
+  });
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) {
+      dialog.close();
+    }
+  });
+  const [summaryResult, playsResult] = await Promise.all([
     supabaseClient
       .from("board_game_player_summary")
       .select("*")
       .order("total_plays", { ascending: false })
       .order("display_name", { ascending: true }),
-    supabaseClient
-      .from("board_game_player_category_stats")
-      .select("*")
-      .order("win_rate", { ascending: false })
-      .order("plays", { ascending: false })
+    fetchPlays(null, null)
   ]);
 
-  throwFirstError(summaryResult, categoriesResult);
-  renderPlayerStats(summaryResult.data || [], categoriesResult.data || []);
+  throwFirstError(summaryResult, playsResult);
+  renderPlayerStats(summaryResult.data || [], playsResult.data || []);
 }
 
-function renderPlayerStats(summaries, categoryStats) {
+function summarizePlayerGames(plays, playerId) {
+  const games = new Map();
+  plays.forEach((play) => {
+    const participant = (play.participants || []).find((entry) => entry.player_id === playerId);
+    if (!participant) {
+      return;
+    }
+    const game = games.get(play.game_id) || {
+      name: play.game?.name || "Unknown game", plays: 0, wins: 0, scores: []
+    };
+    game.plays += 1;
+    game.wins += participant.is_winner ? 1 : 0;
+    if (participant.score !== null && participant.score !== undefined && Number.isFinite(Number(participant.score))) {
+      game.scores.push(Number(participant.score));
+    }
+    games.set(play.game_id, game);
+  });
+  return [...games.values()].map((game) => ({
+    ...game,
+    winRate: game.wins / game.plays * 100,
+    averageScore: game.scores.length ? average(game.scores) : null
+  })).sort((left, right) => right.winRate - left.winRate || right.plays - left.plays || left.name.localeCompare(right.name));
+}
+
+function openPlayerDialog(summary, games) {
+  setText("playerDialogTitle", `${summary.display_name}'s games`);
+  const body = document.getElementById("playerDialogBody");
+  body.replaceChildren();
+  if (!games.length) {
+    body.append(createMessage("No recorded games yet."));
+  } else {
+    const table = createElement("table", "player-game-table");
+    const heading = document.createElement("thead");
+    const headingRow = document.createElement("tr");
+    ["Game", "Plays", "Wins", "Win rate", "Avg. score"].forEach((label) => {
+      const cell = createElement("th", "", label);
+      cell.scope = "col";
+      headingRow.append(cell);
+    });
+    heading.append(headingRow);
+    const rows = document.createElement("tbody");
+    games.forEach((game) => {
+      const row = document.createElement("tr");
+      const name = createElement("th", "", game.name);
+      name.scope = "row";
+      row.append(name);
+      [game.plays, game.wins, `${formatDecimal(game.winRate)}%`, game.averageScore === null ? "Not scored" : formatDecimal(game.averageScore)]
+        .forEach((value, index) => {
+          const cell = createElement("td", "", value);
+          cell.dataset.label = ["Plays", "Wins", "Win rate", "Avg. score"][index];
+          row.append(cell);
+        });
+      rows.append(row);
+    });
+    table.append(heading, rows);
+    body.append(table);
+  }
+  document.getElementById("playerDialog").showModal();
+}
+
+function renderPlayerStats(summaries, plays) {
   setText("trackedPlayerCount", summaries.length);
   setText("mostActivePlayer", summaries[0]?.display_name || "No plays yet");
   const mostWins = [...summaries].sort((left, right) => Number(right.wins) - Number(left.wins))[0];
@@ -1482,24 +1551,31 @@ function renderPlayerStats(summaries, categoryStats) {
     metrics.append(createPlayerMetric(summary.win_rate === null ? "-" : `${formatDecimal(summary.win_rate)}%`, "Win rate"));
     card.append(metrics);
 
-    const playerCategories = categoryStats
-      .filter((row) => row.player_id === summary.player_id)
-      .sort((left, right) => Number(right.win_rate) - Number(left.win_rate) || Number(right.plays) - Number(left.plays))
-      .slice(0, 4);
+    const playerGames = summarizePlayerGames(plays, summary.player_id);
 
-    if (playerCategories.length) {
+    if (playerGames.length) {
       const categorySection = createElement("section", "category-section");
-      categorySection.append(createElement("h4", "", "Best categories"));
+      categorySection.append(createElement("h4", "", "Top games by win rate"));
       const list = createElement("div", "category-list");
-      playerCategories.forEach((category) => {
-        const row = createElement("div", "category-row");
-        row.append(createElement("span", "", category.category));
-        row.append(createElement("strong", "", `${formatDecimal(category.win_rate)}% from ${category.plays}`));
+      playerGames.slice(0, 3).forEach((game) => {
+        const row = createElement("button", "category-row player-game-button");
+        row.type = "button";
+        row.setAttribute("aria-haspopup", "dialog");
+        row.setAttribute("aria-label", `${game.name}, ${formatDecimal(game.winRate)}% wins. View all games for ${summary.display_name}`);
+        row.append(createElement("span", "", game.name));
+        row.append(createElement("strong", "", `${formatDecimal(game.winRate)}% / ${game.plays} plays`));
+        row.addEventListener("click", () => openPlayerDialog(summary, playerGames));
         list.append(row);
       });
       categorySection.append(list);
       card.append(categorySection);
     }
+
+    const details = createElement("button", "button-secondary", "All game statistics");
+    details.type = "button";
+    details.setAttribute("aria-haspopup", "dialog");
+    details.addEventListener("click", () => openPlayerDialog(summary, playerGames));
+    card.append(details);
 
     grid.append(card);
   });

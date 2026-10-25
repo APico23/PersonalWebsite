@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Austin's Book Wishlist</title>
+    <meta name="description" content="Books on Austin's wishlist." />
+    <meta name="theme-color" content="#173a2e" />
+    <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@400;500;600;700&family=Literata:opsz,wght@7..72,500;7..72,650&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css?v=__ASSET_VERSION__" />
+  </head>
+  <body data-page="wishlist">
+    <div class="page-shell">
+      <header class="topbar compact-topbar">
+        <div class="brand-block">
+          <span class="collection-label">Austin's collection</span>
+          <h1>Book Wishlist</h1>
+          <p>Next on the shelf.</p>
+        </div>
+        <a class="home-link" href="../index.html">Back to home</a>
+      </header>
+      <nav class="page-nav" aria-label="Book library">
+        <a class="nav-link" data-nav="catalog" href="index.html">Library</a>
+        <a class="nav-link" data-nav="wishlist" href="wishlist.html">Wishlist</a>
+        <a class="nav-link" data-nav="manage" href="manage.html">Manage</a>
+      </nav>
+      <div id="globalStatus" class="status-banner" role="status" hidden></div>
+      <main>
+        <section class="catalog-panel">
+          <div class="catalog-toolbar">
+            <div>
+              <h2>Want to own</h2>
+              <p id="catalogCount" aria-live="polite">Loading wishlist...</p>
+            </div>
+            <label class="search-field">
+              <span>Search wishlist</span>
+              <input id="bookSearch" type="search" autocomplete="off" />
+            </label>
+            <label class="sort-field">
+              <span>Sort by</span>
+              <select id="bookSort">
+                <option value="title">Title</option>
+                <option value="author">Author</option>
+                <option value="rating">Highest rated</option>
+              </select>
+            </label>
+          </div>
+          <div class="filter-tabs" id="bookFilters" aria-label="Filter wishlist">
+            <button type="button" data-filter="all" aria-pressed="true">All</button>
+            <button type="button" data-filter="unread" aria-pressed="false">Unread</button>
+            <button type="button" data-filter="reading" aria-pressed="false">Reading</button>
+            <button type="button" data-filter="read" aria-pressed="false">Read</button>
+            <button type="button" data-filter="did_not_finish" aria-pressed="false">Did not finish</button>
+          </div>
+          <div class="book-grid" id="bookGrid" aria-live="polite">
+            <div class="loading-block">Loading wishlist...</div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.0/dist/umd/supabase.js"></script>
+    <script src="app.js?v=__ASSET_VERSION__"></script>
+    <script src="../legal-footer.js" data-privacy="../privacy.html"></script>
+  </body>
+</html>

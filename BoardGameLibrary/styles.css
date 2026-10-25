@@ -1520,6 +1520,88 @@ button:disabled {
   font-size: 1.3rem;
 }
 
+.player-game-button {
+  width: 100%;
+  padding: 0.6rem;
+  border: 1px solid var(--line);
+  text-align: left;
+  background: var(--surface-strong);
+}
+
+.player-game-button:hover {
+  color: var(--teal-dark);
+  background: var(--surface);
+}
+
+.player-game-button span,
+.player-game-table th {
+  overflow-wrap: anywhere;
+}
+
+.player-card > .button-secondary {
+  margin-top: 1rem;
+}
+
+.player-game-scroll {
+  overflow-x: auto;
+}
+
+.player-game-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.player-game-table th,
+.player-game-table td {
+  padding: 0.75rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.player-game-table td {
+  white-space: nowrap;
+}
+
+@media (max-width: 40rem) {
+  .player-game-table thead {
+    display: none;
+  }
+
+  .player-game-table tbody {
+    display: block;
+  }
+
+  .player-game-table tr {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border-bottom: 1px solid var(--line);
+  }
+
+  .player-game-table th {
+    grid-column: 1 / -1;
+    padding-bottom: 0;
+  }
+
+  .player-game-table th,
+  .player-game-table td {
+    border: 0;
+  }
+
+  .player-game-table td {
+    padding-inline: 0.35rem;
+    white-space: normal;
+  }
+
+  .player-game-table td::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.25rem;
+    color: var(--muted);
+    font-size: 0.65rem;
+  }
+}
+
 .inline-auth-form,
 .lookup-form {
   display: grid;

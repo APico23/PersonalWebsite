@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Board Game Player Statistics</title>
-    <meta name="description" content="Player totals, win rates, favorite games, and category performance." />
+    <meta name="description" content="Player totals, top games by win rate, and per-game scores." />
     <meta name="theme-color" content="#174f59" />
     <link rel="icon" href="../favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -21,7 +21,7 @@
         <div class="brand-block">
           <span class="cabinet-label">Around the table</span>
           <h1>Player Statistics</h1>
-          <p>Play totals, wins, most-played games, and the categories each player knows best.</p>
+          <p>Play totals, wins, and each player's top games.</p>
         </div>
         <a class="home-link" href="../index.html">Back to home</a>
       </header>
@@ -64,6 +64,14 @@
           </div>
         </section>
       </main>
+
+      <dialog class="game-dialog" id="playerDialog" aria-labelledby="playerDialogTitle">
+        <div class="game-dialog-header">
+          <h2 id="playerDialogTitle">Player games</h2>
+          <button class="dialog-close" id="closePlayerDialog" type="button" aria-label="Close player statistics">&times;</button>
+        </div>
+        <div id="playerDialogBody" class="player-game-scroll"></div>
+      </dialog>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.0/dist/umd/supabase.js"></script>

@@ -10,9 +10,7 @@ const libraryState = {
   activeFilter: "all",
   session: null,
   isAdmin: false,
-  manageBound: false,
-  rankingSortable: null,
-  rankingSaving: false
+  manageBound: false
 };
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -37,13 +35,10 @@ async function initializeLibrary() {
   }
   await applySession(data.session);
 
-  if (page === "catalog") {
+  if (page === "catalog" || page === "wishlist") {
     bindCatalogControls();
     await loadBooks();
     renderCatalogPage();
-  } else if (page === "ranking") {
-    await loadBooks();
-    renderRankingPage();
   } else if (page === "manage") {
     bindManageControls();
     if (libraryState.isAdmin) {
@@ -67,9 +62,6 @@ async function handleAuthChange(session) {
     await refreshManagePage();
   }
 
-  if (document.body.dataset.page === "ranking" && libraryState.books.length) {
-    renderRankingPage();
-  }
 }
 
 async function applySession(session) {
@@ -170,6 +162,7 @@ async function loadBooks() {
 
 function bindCatalogControls() {
   document.getElementById("bookSearch").addEventListener("input", renderCatalog);
+  document.getElementById("bookSort").addEventListener("change", renderCatalog);
   document.getElementById("bookFilters").addEventListener("click", (event) => {
     const button = event.target.closest("button[data-filter]");
     if (!button) {
@@ -188,22 +181,26 @@ function renderCatalogPage() {
   const owned = libraryState.books.filter((book) => book.ownership_status === "owned");
   const wanted = libraryState.books.filter((book) => book.ownership_status === "wanted");
   const read = owned.filter((book) => book.reading_status === "read");
-  const ranked = getRankedBooks();
+  const rated = owned.filter((book) => book.rating !== null && book.rating !== undefined)
+    .sort((left, right) => Number(right.rating) - Number(left.rating) || left.title.localeCompare(right.title));
 
   setText("ownedCount", owned.length);
+  setText("readingCount", owned.filter((book) => book.reading_status === "reading").length);
   setText("wantedCount", wanted.length);
   setText("readCount", read.length);
-  setText("favoriteBook", ranked[0]?.title || "No ranked books yet");
+  setText("favoriteBook", rated[0]?.title || "No rated books yet");
   renderCatalog();
 }
 
 function renderCatalog() {
   const search = document.getElementById("bookSearch").value.trim().toLowerCase();
+  const ownership = document.body.dataset.page === "wishlist" ? "wanted" : "owned";
   const filteredBooks = libraryState.books.filter((book) => {
+    if (book.ownership_status !== ownership) {
+      return false;
+    }
     const matchesFilter = libraryState.activeFilter === "all"
-      || (libraryState.activeFilter === "owned" && book.ownership_status === "owned")
-      || (libraryState.activeFilter === "wanted" && book.ownership_status === "wanted")
-      || (libraryState.activeFilter === "read" && book.ownership_status === "owned" && book.reading_status === "read");
+      || libraryState.activeFilter === book.reading_status;
 
     if (!matchesFilter) {
       return false;
@@ -223,6 +220,17 @@ function renderCatalog() {
     ].filter(Boolean).join(" ").toLowerCase();
 
     return searchable.includes(search);
+  });
+
+  const sort = document.getElementById("bookSort").value;
+  filteredBooks.sort((left, right) => {
+    if (sort === "rating") {
+      return (right.rating ?? -1) - (left.rating ?? -1) || left.title.localeCompare(right.title);
+    }
+    if (sort === "author") {
+      return (left.authors?.[0] || "").localeCompare(right.authors?.[0] || "") || left.title.localeCompare(right.title);
+    }
+    return left.title.localeCompare(right.title);
   });
 
   setText(
@@ -248,6 +256,9 @@ function createBookCard(book) {
   card.append(createBookCover(book, "book-cover", "cover-fallback"));
 
   const content = createElement("div", "book-card-content");
+  if (book.rating !== null && book.rating !== undefined) {
+    content.append(createElement("span", "book-rating", `${formatBookRating(book.rating)} / 10`));
+  }
   content.append(createElement("h3", "", book.title));
 
   const authorText = book.authors?.length ? book.authors.join(", ") : "Unknown author";
@@ -279,202 +290,8 @@ function createBookCard(book) {
   return card;
 }
 
-function getRankedBooks() {
-  return libraryState.books
-    .filter((book) => (
-      book.ownership_status === "owned"
-      && book.reading_status === "read"
-      && Number.isFinite(Number(book.rank_position))
-    ))
-    .sort((left, right) => Number(left.rank_position) - Number(right.rank_position));
-}
-
-function renderRankingPage() {
-  libraryState.rankingSortable?.destroy();
-  libraryState.rankingSortable = null;
-
-  const rankedBooks = getRankedBooks();
-  setText(
-    "rankingCount",
-    `${rankedBooks.length} finished book${rankedBooks.length === 1 ? "" : "s"}`
-  );
-
-  const context = document.getElementById("rankingAdminContext");
-  context.textContent = libraryState.rankingSaving
-    ? "Saving order..."
-    : libraryState.isAdmin ? "Editing enabled" : "Public view";
-  context.classList.toggle("is-admin", libraryState.isAdmin);
-
-  const list = document.getElementById("rankingList");
-  list.replaceChildren();
-
-  if (!rankedBooks.length) {
-    list.append(createMessage("No owned and read books are ranked yet."));
-    return;
-  }
-
-  const fragment = document.createDocumentFragment();
-  rankedBooks.forEach((book, index) => {
-    const row = createElement("li", "ranking-row");
-    row.dataset.bookId = book.book_id;
-    row.append(createBookRankPosition(index, book));
-    row.append(createBookCover(book, "rank-cover", "rank-cover-fallback"));
-
-    const details = createElement("div", "rank-book");
-    details.append(createElement("h3", "", book.title));
-    details.append(createElement(
-      "p",
-      "",
-      book.authors?.length ? book.authors.join(", ") : "Unknown author"
-    ));
-    if (index === 0) {
-      details.append(createElement("span", "favorite-label", "Current favorite"));
-    }
-    row.append(details);
-
-    if (libraryState.isAdmin) {
-      row.append(createRankControls(book, index, rankedBooks.length));
-    }
-
-    fragment.append(row);
-  });
-  list.append(fragment);
-  initializeBookRankingDrag();
-}
-
-function createBookRankPosition(index, book) {
-  const position = createElement("div", "rank-position");
-  position.append(createElement("strong", "rank-number", index + 1));
-
-  if (libraryState.isAdmin) {
-    const handle = createElement("button", "rank-drag-handle", "\u2195");
-    handle.type = "button";
-    handle.disabled = libraryState.rankingSaving;
-    handle.title = `Drag ${book.title} to a new rank`;
-    handle.setAttribute("aria-label", handle.title);
-    position.append(handle);
-  }
-  return position;
-}
-
-function createRankControls(book, index, total) {
-  const controls = createElement("div", "rank-controls");
-  const stepControls = createElement("div", "rank-step-controls");
-  const upButton = createElement("button", "rank-button", "\u2191");
-  const downButton = createElement("button", "rank-button", "\u2193");
-
-  upButton.type = "button";
-  downButton.type = "button";
-  upButton.disabled = libraryState.rankingSaving || index === 0;
-  downButton.disabled = libraryState.rankingSaving || index === total - 1;
-  upButton.title = `Move ${book.title} up`;
-  downButton.title = `Move ${book.title} down`;
-  upButton.setAttribute("aria-label", upButton.title);
-  downButton.setAttribute("aria-label", downButton.title);
-  upButton.addEventListener("click", () => setRankedBookPosition(book.book_id, index));
-  downButton.addEventListener("click", () => setRankedBookPosition(book.book_id, index + 2));
-  stepControls.append(upButton, downButton);
-
-  const rankForm = createElement("form", "rank-jump-form");
-  const rankLabel = createElement("label", "rank-jump-label", "Rank");
-  const rankInput = createElement("input", "rank-jump-input");
-  rankInput.type = "number";
-  rankInput.inputMode = "numeric";
-  rankInput.min = "1";
-  rankInput.max = String(total);
-  rankInput.value = String(index + 1);
-  rankInput.disabled = libraryState.rankingSaving;
-  rankInput.setAttribute("aria-label", `New rank for ${book.title}`);
-  rankInput.addEventListener("focus", () => rankInput.select());
-  rankLabel.append(rankInput);
-
-  const rankSubmit = createElement("button", "rank-jump-button", "Go");
-  rankSubmit.type = "submit";
-  rankSubmit.disabled = libraryState.rankingSaving;
-  rankSubmit.setAttribute("aria-label", `Move ${book.title} to entered rank`);
-  rankForm.addEventListener("submit", (event) => {
-    event.preventDefault();
-    setRankedBookPosition(book.book_id, Number(rankInput.value));
-  });
-  rankForm.append(rankLabel, rankSubmit);
-
-  controls.append(stepControls, rankForm);
-  return controls;
-}
-
-function initializeBookRankingDrag() {
-  if (!libraryState.isAdmin || libraryState.rankingSaving || !window.Sortable) {
-    return;
-  }
-
-  libraryState.rankingSortable = window.Sortable.create(document.getElementById("rankingList"), {
-    animation: 150,
-    handle: ".rank-drag-handle",
-    draggable: ".ranking-row",
-    ghostClass: "is-dragging",
-    chosenClass: "is-drag-chosen",
-    forceFallback: true,
-    fallbackOnBody: true,
-    fallbackTolerance: 3,
-    swapThreshold: 0.65,
-    onEnd(event) {
-      if (event.oldIndex === event.newIndex) {
-        return;
-      }
-      const bookId = event.item.dataset.bookId;
-      window.setTimeout(() => setRankedBookPosition(bookId, event.newIndex + 1), 0);
-    }
-  });
-}
-
-async function setRankedBookPosition(bookId, requestedPosition) {
-  if (libraryState.rankingSaving) {
-    return;
-  }
-
-  const rankedBooks = getRankedBooks();
-  const currentIndex = rankedBooks.findIndex((book) => book.book_id === bookId);
-  const numericPosition = Math.trunc(Number(requestedPosition));
-  if (currentIndex < 0 || !Number.isFinite(numericPosition)) {
-    renderRankingPage();
-    return;
-  }
-
-  const targetIndex = Math.min(Math.max(numericPosition - 1, 0), rankedBooks.length - 1);
-  if (currentIndex === targetIndex) {
-    renderRankingPage();
-    return;
-  }
-
-  const previousRanks = new Map(rankedBooks.map((book) => [book.book_id, book.rank_position]));
-  const [movedBook] = rankedBooks.splice(currentIndex, 1);
-  rankedBooks.splice(targetIndex, 0, movedBook);
-  rankedBooks.forEach((book, index) => {
-    book.rank_position = index + 1;
-  });
-
-  libraryState.rankingSaving = true;
-  renderRankingPage();
-  setGlobalStatus(`Moving ${movedBook.title} to rank ${targetIndex + 1}...`, "info");
-
-  const { error } = await supabaseClient.rpc("set_library_book_rank", {
-    p_book_id: bookId,
-    p_target_position: targetIndex + 1
-  });
-
-  if (error) {
-    rankedBooks.forEach((book) => {
-      book.rank_position = previousRanks.get(book.book_id);
-    });
-    libraryState.rankingSaving = false;
-    renderRankingPage();
-    setGlobalStatus(error.message, "error");
-    return;
-  }
-
-  libraryState.rankingSaving = false;
-  renderRankingPage();
-  hideGlobalStatus();
+function formatBookRating(rating) {
+  return Number(rating).toLocaleString(undefined, { maximumFractionDigits: 1 });
 }
 
 function bindManageControls() {
@@ -526,11 +343,17 @@ async function saveBook(event) {
     cover_url: optionalText(formControl(form, "coverUrl").value),
     ownership_status: formControl(form, "ownershipStatus").value,
     reading_status: formControl(form, "readingStatus").value,
+    rating: optionalNumber(formControl(form, "rating").value),
     date_started: optionalText(formControl(form, "dateStarted").value),
     date_finished: optionalText(formControl(form, "dateFinished").value),
     description: optionalText(formControl(form, "description").value),
     notes: optionalText(formControl(form, "notes").value)
   };
+
+  if (payload.rating !== null && (!Number.isFinite(payload.rating) || payload.rating < 0 || payload.rating > 10)) {
+    setLocalStatus("bookFormStatus", "Rating must be between 0 and 10.", "error");
+    return;
+  }
 
   const bookId = formControl(form, "bookId").value;
   setLocalStatus("bookFormStatus", "Saving book...", "info");
@@ -571,7 +394,7 @@ function renderManageBookList() {
     main.append(createElement(
       "p",
       "",
-      `${book.authors?.join(", ") || "Unknown author"}, ${formatOwnershipStatus(book.ownership_status)}, ${formatReadingStatus(book.reading_status)}`
+      `${book.authors?.join(", ") || "Unknown author"}, ${formatOwnershipStatus(book.ownership_status)}, ${formatReadingStatus(book.reading_status)}${book.rating !== null && book.rating !== undefined ? `, ${formatBookRating(book.rating)}/10` : ""}`
     ));
 
     const actions = createElement("div", "record-actions");
@@ -610,6 +433,7 @@ function startEditingBook(book) {
     coverUrl: book.cover_url,
     ownershipStatus: book.ownership_status,
     readingStatus: book.reading_status,
+    rating: book.rating,
     dateStarted: book.date_started,
     dateFinished: book.date_finished,
     description: book.description,
