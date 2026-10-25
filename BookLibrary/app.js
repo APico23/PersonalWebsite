@@ -161,6 +161,18 @@ async function loadBooks() {
 }
 
 function bindCatalogControls() {
+  bindBookDialog();
+  if (document.body.dataset.page === "catalog") {
+    let capacity = getShelfCapacity();
+    const observer = new ResizeObserver(() => {
+      const nextCapacity = getShelfCapacity();
+      if (nextCapacity !== capacity) {
+        capacity = nextCapacity;
+        renderCatalog();
+      }
+    });
+    observer.observe(document.getElementById("bookGrid"));
+  }
   document.getElementById("bookSearch").addEventListener("input", renderCatalog);
   document.getElementById("bookSort").addEventListener("change", renderCatalog);
   document.getElementById("bookFilters").addEventListener("click", (event) => {
@@ -247,8 +259,155 @@ function renderCatalog() {
   }
 
   const fragment = document.createDocumentFragment();
-  filteredBooks.forEach((book) => fragment.append(createBookCard(book)));
+  if (document.body.dataset.page === "catalog") {
+    const genres = new Map();
+    filteredBooks.forEach((book) => {
+      const genre = (book.genres || []).find((value) => value?.trim())?.trim() || "Uncategorized";
+      const key = genre.toLowerCase();
+      if (!genres.has(key)) {
+        genres.set(key, { name: genre, books: [] });
+      }
+      genres.get(key).books.push(book);
+    });
+    const orderedBooks = [...genres.values()]
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .flatMap((genre) => genre.books.map((book) => ({ book, genre: genre.name })));
+    const capacity = getShelfCapacity();
+    for (let offset = 0; offset < orderedBooks.length; offset += capacity) {
+      const shelf = createElement("section", "book-shelf");
+      shelf.setAttribute("aria-label", `Bookshelf ${Math.floor(offset / capacity) + 1}`);
+      shelf.style.setProperty("--shelf-capacity", capacity);
+      const books = createElement("div", "shelf-books");
+      const row = orderedBooks.slice(offset, offset + capacity);
+      const labels = [];
+      row.forEach(({ book, genre }) => {
+        books.append(createBookSpine(book));
+        const previous = labels[labels.length - 1];
+        if (previous?.genre === genre) {
+          previous.count += 1;
+        } else {
+          labels.push({ genre, count: 1 });
+        }
+      });
+      const base = createElement("div", "shelf-base");
+      labels.forEach(({ genre, count }) => {
+        const label = createElement("h3", "shelf-genre", genre);
+        label.style.gridColumn = `span ${count}`;
+        label.title = genre;
+        label.tabIndex = 0;
+        base.append(label);
+      });
+      shelf.append(books, base);
+      fragment.append(shelf);
+    }
+  } else {
+    filteredBooks.forEach((book) => fragment.append(createBookCard(book)));
+  }
   grid.append(fragment);
+}
+
+function getShelfCapacity() {
+  return Math.max(1, Math.floor((document.getElementById("bookGrid").clientWidth - 24) / 76));
+}
+
+function createBookSpine(book) {
+  const colors = ["#4e1926", "#173d30", "#642a32", "#234e3b", "#702b29", "#24382f", "#443025"];
+  const seed = [...(book.book_id || book.title)].reduce((total, character) => (total * 31 + character.charCodeAt(0)) >>> 0, 0);
+  const slot = createElement("div", "spine-slot");
+  const spine = createElement("button", "book-spine");
+  spine.type = "button";
+  spine.style.setProperty("--spine-color", colors[seed % colors.length]);
+  spine.style.setProperty("--spine-height", `${232 + seed % 35}px`);
+  spine.style.setProperty("--spine-font", book.title.length > 50 ? "0.72rem" : "0.92rem");
+  spine.setAttribute("aria-label", `${book.title}, ${book.authors?.join(", ") || "Unknown author"}. View book details`);
+  spine.setAttribute("aria-haspopup", "dialog");
+  spine.title = book.title;
+  const text = createElement("span", "spine-text");
+  text.append(createElement("span", "spine-title", book.title));
+  text.append(createElement("span", "spine-author", book.authors?.join(", ") || "Unknown author"));
+  spine.append(text);
+  if (book.rating !== null && book.rating !== undefined) {
+    spine.append(createElement("span", "spine-rating", `${formatBookRating(book.rating)}/10`));
+  }
+  spine.addEventListener("click", () => openBookDialog(book));
+  slot.append(spine);
+  return slot;
+}
+
+function bindBookDialog() {
+  const dialog = createElement("dialog", "book-dialog");
+  dialog.id = "bookDialog";
+  dialog.setAttribute("aria-labelledby", "bookDialogTitle");
+  const header = createElement("div", "book-dialog-header");
+  const title = createElement("h2");
+  title.id = "bookDialogTitle";
+  const close = createElement("button", "book-dialog-close", "\u00d7");
+  close.type = "button";
+  close.setAttribute("aria-label", "Close book details");
+  close.title = "Close book details";
+  close.addEventListener("click", () => dialog.close());
+  header.append(title, close);
+  const body = createElement("div", "book-dialog-body");
+  body.id = "bookDialogBody";
+  dialog.append(header, body);
+  dialog.addEventListener("click", (event) => {
+    if (event.target === dialog) {
+      dialog.close();
+    }
+  });
+  dialog.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      dialog.close();
+    }
+  });
+  document.body.append(dialog);
+}
+
+function openBookDialog(book) {
+  setText("bookDialogTitle", book.title);
+  const body = document.getElementById("bookDialogBody");
+  body.replaceChildren();
+  const overview = createElement("div", "book-detail-overview");
+  overview.append(createBookCover(book, "book-detail-cover", "book-detail-cover cover-fallback"));
+  const copy = createElement("div", "book-detail-copy");
+  if (book.subtitle) {
+    copy.append(createElement("p", "book-detail-subtitle", book.subtitle));
+  }
+  copy.append(createElement("p", "", book.authors?.join(", ") || "Unknown author"));
+  copy.append(createElement("p", "book-detail-rating", book.rating === null || book.rating === undefined ? "Not rated" : `${formatBookRating(book.rating)} / 10`));
+  const facts = createElement("dl", "book-detail-facts");
+  const entries = [
+    ["Collection", formatOwnershipStatus(book.ownership_status)],
+    ["Reading", formatReadingStatus(book.reading_status)],
+    ["Genres", book.genres?.join(", ")],
+    ["Published", book.published_year],
+    ["Publisher", book.publisher],
+    ["Format", book.book_format],
+    ["Pages", book.page_count],
+    ["Language", book.language],
+    ["Series", [book.series_name, book.series_number !== null && book.series_number !== undefined ? `#${book.series_number}` : null].filter(Boolean).join(" ")],
+    ["ISBN-13", book.isbn_13],
+    ["ISBN-10", book.isbn_10],
+    ["Started", book.date_started],
+    ["Finished", book.date_finished]
+  ];
+  entries.forEach(([label, value]) => {
+    if (value !== null && value !== undefined && value !== "") {
+      facts.append(createElement("dt", "", label), createElement("dd", "", value));
+    }
+  });
+  copy.append(facts);
+  overview.append(copy);
+  body.append(overview);
+  [["About the book", book.description], ["Personal notes", book.notes]].forEach(([label, value]) => {
+    if (value) {
+      const section = createElement("section", "book-detail-section");
+      section.append(createElement("h3", "", label), createElement("p", "", value));
+      body.append(section);
+    }
+  });
+  document.getElementById("bookDialog").showModal();
 }
 
 function createBookCard(book) {
@@ -286,6 +445,11 @@ function createBookCard(book) {
   });
 
   content.append(tags);
+  const detailsButton = createElement("button", "button-secondary", "Book details");
+  detailsButton.type = "button";
+  detailsButton.setAttribute("aria-haspopup", "dialog");
+  detailsButton.addEventListener("click", () => openBookDialog(book));
+  content.append(detailsButton);
   card.append(content);
   return card;
 }
